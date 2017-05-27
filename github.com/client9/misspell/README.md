@@ -2,7 +2,29 @@
 
 Correct commonly misspelled English words... quickly.
 
-### install with `go get -u github.com/client9/misspell/cmd/misspell`
+### Install
+
+
+If you just want a binary and to start using `misspell`:
+
+```
+curl -o ./godownloader-misspell.sh https://raw.githubusercontent.com/client9/misspell/master/godownloader-misspell.sh 
+/bin/sh ./godownloader-misspell.sh
+```
+
+will install as `./bin/misspell`.  You can adjust the download location using the `-b` flag.   File a ticket if you want another platform supported.
+
+
+If you use [Go](https://golang.org/), the best way to run `misspell` is by using [gometalinter](#gometalinter).  Otherwise, install `misspell` the old-fashioned way:
+
+```
+go get -u github.com/client9/misspell/cmd/misspell
+```
+
+and misspell will be in your `GOPATH`
+
+### Usage
+
 
 ```bash
 $ misspell all.html your.txt important.md files.go
@@ -11,11 +33,28 @@ your.txt:42:10 found "langauge" a misspelling of "language"
 # ^ file, line, column
 ```
 
-You'll need [golang 1.5 or newer](https://golang.org/) installed to compile
-it.  But after that it's a standalone binary.
-
-If people want pre-compiled binaries, [file a
-ticket](https://github.com/client9/misspell/issues) please.
+```
+$ misspell -help
+Usage of misspell:
+  -debug
+    	Debug matching, very slow
+  -error
+    	Exit with 2 if misspelling found
+  -f string
+    	'csv', 'sqlite3' or custom Golang template for output
+  -i string
+    	ignore the following corrections, comma separated
+  -j int
+    	Number of workers, 0 = number of CPUs
+  -locale string
+    	Correct spellings using locale perferances for US or UK.  Default is to use a neutral variety of English.  Setting locale to US will correct the British spelling of 'colour' to 'color'
+  -o string
+    	output file or [stderr|stdout|] (default "stdout")
+  -q	Do not emit misspelling output
+  -source string
+    	Source mode: auto=guess, go=golang source, text=plain or markdown-like text (default "auto")
+  -w	Overwrite file with corrections (default is just to display)
+```
 
 ## FAQ
 
@@ -164,7 +203,7 @@ of `misspell`
 You may wish to run this on your plaintext (.txt) and/or markdown files too.
 
 
-<a name="csv"</a>
+<a name="csv"></a>
 ### How Can I Get CSV Output?
 
 Using `-f csv`, the output is standard comma-seprated values with headers in the first row.
@@ -176,7 +215,7 @@ file,line,column,typo,corrected
 "README.md",47,25,langauge,language
 ```
 
-<a name="sqlite"</a>
+<a name="sqlite"></a>
 ### How can I export to SQLite3? 
 
 Using `-f sqlite`, the output is a [sqlite3](https://www.sqlite.org/index.html) dump-file.

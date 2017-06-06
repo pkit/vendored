@@ -142,6 +142,12 @@ func (rn *RawNode) Campaign() error {
 	})
 }
 
+// LastProposalIndex returns the most recent log index assigned.
+// Only makes sense to call on a node that believes itself to be the leader.
+func (rn *RawNode) LastProposalIndex() (index uint64, term uint64) {
+	return rn.raft.raftLog.lastIndex(), rn.raft.Term
+}
+
 // Propose proposes data be appended to the raft log.
 func (rn *RawNode) Propose(data []byte) error {
 	return rn.raft.Step(pb.Message{

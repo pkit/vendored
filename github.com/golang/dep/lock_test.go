@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/golang/dep/internal/gps"
-	"github.com/golang/dep/internal/test"
+	"github.com/golang/dep/test"
+	"github.com/sdboyer/gps"
 )
 
 func TestReadLock(t *testing.T) {
@@ -28,12 +28,10 @@ func TestReadLock(t *testing.T) {
 
 	b, _ := hex.DecodeString("2252a285ab27944a4d7adcba8dbd03980f59ba652f12db39fa93b927c345593e")
 	want := &Lock{
-		SolveMeta: SolveMeta{
-			InputsDigest: b,
-		},
+		Memo: b,
 		P: []gps.LockedProject{
 			gps.NewLockedProject(
-				gps.ProjectIdentifier{ProjectRoot: gps.ProjectRoot("github.com/golang/dep/internal/gps")},
+				gps.ProjectIdentifier{ProjectRoot: gps.ProjectRoot("github.com/sdboyer/gps")},
 				gps.NewBranch("master").Is(gps.Revision("d05d5aca9f895d19e9265839bffeadd74a2d2ecb")),
 				[]string{"."},
 			),
@@ -54,12 +52,10 @@ func TestReadLock(t *testing.T) {
 
 	b, _ = hex.DecodeString("2252a285ab27944a4d7adcba8dbd03980f59ba652f12db39fa93b927c345593e")
 	want = &Lock{
-		SolveMeta: SolveMeta{
-			InputsDigest: b,
-		},
+		Memo: b,
 		P: []gps.LockedProject{
 			gps.NewLockedProject(
-				gps.ProjectIdentifier{ProjectRoot: gps.ProjectRoot("github.com/golang/dep/internal/gps")},
+				gps.ProjectIdentifier{ProjectRoot: gps.ProjectRoot("github.com/sdboyer/gps")},
 				gps.NewVersion("0.12.2").Is(gps.Revision("d05d5aca9f895d19e9265839bffeadd74a2d2ecb")),
 				[]string{"."},
 			),
@@ -79,12 +75,10 @@ func TestWriteLock(t *testing.T) {
 	want := h.GetTestFileString(golden)
 	memo, _ := hex.DecodeString("2252a285ab27944a4d7adcba8dbd03980f59ba652f12db39fa93b927c345593e")
 	l := &Lock{
-		SolveMeta: SolveMeta{
-			InputsDigest: memo,
-		},
+		Memo: memo,
 		P: []gps.LockedProject{
 			gps.NewLockedProject(
-				gps.ProjectIdentifier{ProjectRoot: gps.ProjectRoot("github.com/golang/dep/internal/gps")},
+				gps.ProjectIdentifier{ProjectRoot: gps.ProjectRoot("github.com/sdboyer/gps")},
 				gps.NewBranch("master").Is(gps.Revision("d05d5aca9f895d19e9265839bffeadd74a2d2ecb")),
 				[]string{"."},
 			),
@@ -110,12 +104,10 @@ func TestWriteLock(t *testing.T) {
 	want = h.GetTestFileString(golden)
 	memo, _ = hex.DecodeString("2252a285ab27944a4d7adcba8dbd03980f59ba652f12db39fa93b927c345593e")
 	l = &Lock{
-		SolveMeta: SolveMeta{
-			InputsDigest: memo,
-		},
+		Memo: memo,
 		P: []gps.LockedProject{
 			gps.NewLockedProject(
-				gps.ProjectIdentifier{ProjectRoot: gps.ProjectRoot("github.com/golang/dep/internal/gps")},
+				gps.ProjectIdentifier{ProjectRoot: gps.ProjectRoot("github.com/sdboyer/gps")},
 				gps.NewVersion("0.12.2").Is(gps.Revision("d05d5aca9f895d19e9265839bffeadd74a2d2ecb")),
 				[]string{"."},
 			),

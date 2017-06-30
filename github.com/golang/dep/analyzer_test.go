@@ -5,13 +5,15 @@
 package dep
 
 import (
+	"io/ioutil"
+	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/golang/dep/internal/test"
+	"github.com/golang/dep/test"
 )
 
-func TestAnalyzerDeriveManifestAndLock(t *testing.T) {
+func TestDeriveManifestAndLock(t *testing.T) {
 	h := test.NewHelper(t)
 	defer h.Cleanup()
 
@@ -47,67 +49,17 @@ func TestAnalyzerDeriveManifestAndLock(t *testing.T) {
 	}
 }
 
-func TestAnalyzerDeriveManifestAndLockDoesNotExist(t *testing.T) {
-	h := test.NewHelper(t)
-	defer h.Cleanup()
-
-	h.TempDir("dep")
-
-	a := Analyzer{}
-
-	m, l, err := a.DeriveManifestAndLock(h.Path("dep"), "my/fake/project")
-	if m != nil || l != nil || err != nil {
-		t.Fatalf("expected manifest & lock & err to be nil: m -> %#v l -> %#v err-> %#v", m, l, err)
-	}
-}
-
-func TestAnalyzerDeriveManifestAndLockCannotOpen(t *testing.T) {
-	h := test.NewHelper(t)
-	defer h.Cleanup()
-
-	h.TempDir("dep")
-
-	// Simulate an inaccessible manifest file.
-	h.TempFile(filepath.Join("dep", ManifestName), "")
-	closer, err := makeUnreadable(filepath.Join(h.Path("dep"), ManifestName))
+func TestDeriveManifestAndLockDoesNotExist(t *testing.T) {
+	dir, err := ioutil.TempDir("", "dep")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer closer.Close()
+	defer os.RemoveAll(dir)
 
 	a := Analyzer{}
 
-	// Verify that the solver rejects the manifest, rather than treating it as
-	// offering no constraints.
-	m, l, err := a.DeriveManifestAndLock(h.Path("dep"), "my/fake/project")
-	if m != nil || l != nil || err == nil {
-		t.Fatalf("expected manifest & lock to be nil, err to be not nil: m -> %#v l -> %#v err -> %#v", m, l, err)
-	}
-}
-
-func TestAnalyzerDeriveManifestAndLockInvalidManifest(t *testing.T) {
-	h := test.NewHelper(t)
-	defer h.Cleanup()
-
-	h.TempDir("dep")
-
-	// Create a manifest with invalid contents
-	h.TempFile(filepath.Join("dep", ManifestName), "invalid manifest")
-
-	a := Analyzer{}
-
-	m, l, err := a.DeriveManifestAndLock(h.Path("dep"), "my/fake/project")
-	if m != nil || l != nil || err == nil {
+	m, l, err := a.DeriveManifestAndLock(dir, "my/fake/project")
+	if m != nil || l != nil || err != nil {
 		t.Fatalf("expected manifest & lock & err to be nil: m -> %#v l -> %#v err-> %#v", m, l, err)
-	}
-}
-
-func TestAnalyzerInfo(t *testing.T) {
-	a := Analyzer{}
-
-	name, vers := a.Info()
-
-	if name != "dep" || vers != 1 {
-		t.Fatalf("expected name to be 'dep' and version to be 1: name -> %q vers -> %d", name, vers)
 	}
 }

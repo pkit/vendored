@@ -1,0 +1,210 @@
+#os-tabs {
+	margin: 30px 0;
+
+	button {
+		border: 1px solid #dddddd;
+		background-color: #ffffff;
+		color: $cl_blue;
+		@include avenir_m(16px);
+		outline: 0;
+		width: 32%;
+		padding: 75px 0 5px;
+		position: relative;
+		bottom: -2px;
+		float: left;
+
+
+		&:hover {
+			border: 1px solid $cl_green;
+		}
+
+		&.current {
+			border: 1px solid $cl_green;
+			background-color: #F0FFE8;
+		}
+
+		&:after {
+			position: absolute;
+			font-family: 'FontAwesome';
+			content: "\f078";
+			top: 25px;
+			left: 50%;
+			@include translate(-50%, 0);
+			z-index: 5;
+			font-size: 55px;
+		}
+
+		&#mac {
+			margin: 0 2% 2% 0;
+			&:after {
+				content: "\f179";
+         	}
+		}
+
+		&#linux {
+			margin: 0 2% 2% 0;
+
+			&:after {
+				content: "\f17c";
+         	}
+		}
+
+		&#windows {
+			margin: 0 2% 0 0;
+			&:after {
+				content: "\f17a";
+         	}
+		}
+
+		&#source {
+			margin: 0 2% 0 0;
+			&:after {
+				content: "\f1c6";
+			}
+		}
+	}
+}
+
+.install-button {
+	display: inline-block;
+	border: 1px solid #dddddd;
+	background-color: #ffffff;
+	text-align: center;
+	@include avenir_l(12px);
+	line-height: 12px;
+	color: $cl_blue !important;
+	text-decoration: none !important;
+	padding: 15px 0;
+	float: left;
+
+	&:hover {
+		border: 1px solid $cl_green;
+	}
+
+	&.current {
+		border: 1px solid $cl_green;
+		background-color: #F0FFE8;
+	}
+
+	.c2a {
+		@include avenir_h(12px);
+	}
+}
+
+#mac-installs {
+	.install-button {
+		width: 24.25%;
+
+		&:nth-child(-n+3){
+			margin-right: 1%;
+		}
+	}
+}
+
+#linux-installs {
+	.install-button {
+		width: 32%;
+
+		&:nth-child(-n+2){
+			margin-right: 2%;
+		}
+	}
+}
+
+#windows-installs {
+	.install-button {
+		width: 48%;
+
+		&:nth-child(-n+1){
+			margin-right: 2%;
+		}
+	}
+}
+
+/* Generic Filter Button */
+
+.filters {
+	font-size: 0;
+
+	.filter-button {
+		display: inline-block;
+		border: 1px solid #dddddd;
+		background-color: #ffffff;
+		text-align: center;
+		@include avenir_l(12px);
+		line-height: 12px;
+		color: $cl_blue !important;
+		text-decoration: none !important;
+		padding: 15px;
+		margin: 1%;
+		outline: none;
+
+		&:hover {
+			border: 1px solid $cl_green;
+		}
+
+		&.current {
+			border: 1px solid $cl_green;
+			background-color: #F0FFE8;
+		}
+	}
+
+	a:hover {
+		border-bottom: none;
+	}
+}
+
+.filter-content {
+	display: none;
+
+	&.current {
+		display: block;
+	}
+}
+
+
+@media (min-width: 700px) {
+	#os-tabs {
+		button {
+			width: 150px;
+		}
+	}
+
+	.install-button {
+		width: auto;
+		padding: 15px 40px;
+		float: none;
+
+		@include avenir_l(16px);
+		line-height: 16px;
+
+		.c2a {
+			@include avenir_h(16px);
+		}
+	}
+
+	#mac-installs, #linux-installs, #windows-installs {
+		.install-button {
+			width: auto;
+			margin-right: 0;
+		}
+	}
+
+	.filters {
+		.filter-button {
+			margin: 0 0.5%;
+			@include avenir_l(16px);
+			line-height: 16px;
+		}
+	}
+}
+
+.filters-big {
+	.filter-button {
+		height: 65px;
+		margin: 15px 15px 10px 0px;
+		padding-left: 20px;
+		padding-right: 20px;
+		width: 20%;
+	}
+}

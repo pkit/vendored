@@ -7,9 +7,9 @@ package dep
 import (
 	"path/filepath"
 
-	"github.com/golang/dep/internal/gps"
-	"github.com/golang/dep/internal/test"
+	"github.com/golang/dep/test"
 	"github.com/pkg/errors"
+	"github.com/sdboyer/gps"
 )
 
 // TestProjectContext groups together test project files and helps test them
@@ -20,7 +20,7 @@ type TestProjectContext struct {
 
 	Context       *Ctx
 	Project       *Project
-	SourceManager gps.SourceManager
+	SourceManager *gps.SourceMgr
 }
 
 // NewTestProjectContext creates a new on-disk test project
@@ -37,11 +37,7 @@ func NewTestProjectContext(h *test.Helper, projectName string) *TestProjectConte
 
 	// Set up a Source Manager
 	var err error
-	pc.Context = &Ctx{
-		GOPATH: pc.tempDir,
-		Out:    discardLogger,
-		Err:    discardLogger,
-	}
+	pc.Context = &Ctx{GOPATH: pc.tempDir}
 	pc.SourceManager, err = pc.Context.SourceManager()
 	h.Must(errors.Wrap(err, "Unable to create a SourceManager"))
 
@@ -65,11 +61,7 @@ func (pc *TestProjectContext) Load() {
 	if pc.h.Exist(mp) {
 		mf := pc.h.GetFile(mp)
 		defer mf.Close()
-		var warns []error
-		m, warns, err = readManifest(mf)
-		for _, warn := range warns {
-			pc.Context.Err.Printf("dep: WARNING: %v\n", warn)
-		}
+		m, err = readManifest(mf)
 		pc.h.Must(errors.Wrapf(err, "Unable to read manifest at %s", mp))
 	}
 	var l *Lock

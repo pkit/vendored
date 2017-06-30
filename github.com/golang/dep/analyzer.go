@@ -8,35 +8,26 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/golang/dep/internal/fs"
-	"github.com/golang/dep/internal/gps"
+	"github.com/sdboyer/gps"
 )
 
-// Analyzer implements gps.ProjectAnalyzer.
 type Analyzer struct{}
 
-// HasDepMetadata determines if a dep manifest exists at the specified path.
-func (a Analyzer) HasDepMetadata(path string) bool {
-	mf := filepath.Join(path, ManifestName)
-	fileOK, err := fs.IsRegular(mf)
-	return err == nil && fileOK
-}
-
-// DeriveManifestAndLock reads and returns the manifest at path/ManifestName or nil if one is not found.
-// The Lock is always nil for now.
 func (a Analyzer) DeriveManifestAndLock(path string, n gps.ProjectRoot) (gps.Manifest, gps.Lock, error) {
-	if !a.HasDepMetadata(path) {
+	// TODO: If we decide to support other tools manifest, this is where we would need
+	// to add that support.
+	mf := filepath.Join(path, ManifestName)
+	if fileOK, err := IsRegular(mf); err != nil || !fileOK {
+		// Do not return an error, when does not exist.
 		return nil, nil, nil
 	}
-
-	f, err := os.Open(filepath.Join(path, ManifestName))
+	f, err := os.Open(mf)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil
 	}
 	defer f.Close()
 
-	// Ignore warnings irrelevant to user.
-	m, _, err := readManifest(f)
+	m, err := readManifest(f)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -45,7 +36,6 @@ func (a Analyzer) DeriveManifestAndLock(path string, n gps.ProjectRoot) (gps.Man
 	return m, nil, nil
 }
 
-// Info returns the name and version of this ProjectAnalyzer.
 func (a Analyzer) Info() (string, int) {
 	return "dep", 1
 }

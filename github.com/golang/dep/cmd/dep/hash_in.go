@@ -6,11 +6,12 @@ package main
 
 import (
 	"flag"
+	"fmt"
 
 	"github.com/golang/dep"
-	"github.com/golang/dep/internal/gps"
-	"github.com/golang/dep/internal/gps/pkgtree"
 	"github.com/pkg/errors"
+	"github.com/sdboyer/gps"
+	"github.com/sdboyer/gps/pkgtree"
 )
 
 func (cmd *hashinCommand) Name() string      { return "hash-inputs" }
@@ -24,7 +25,7 @@ func (cmd *hashinCommand) Register(fs *flag.FlagSet) {}
 type hashinCommand struct{}
 
 func (hashinCommand) Run(ctx *dep.Ctx, args []string) error {
-	p, err := ctx.LoadProject()
+	p, err := ctx.LoadProject("")
 	if err != nil {
 		return err
 	}
@@ -51,6 +52,7 @@ func (hashinCommand) Run(ctx *dep.Ctx, args []string) error {
 	if err != nil {
 		return errors.Wrap(err, "prepare solver")
 	}
-	ctx.Out.Println(gps.HashingInputsAsString(s))
+
+	fmt.Println(gps.HashingInputsAsString(s))
 	return nil
 }

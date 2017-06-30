@@ -5,131 +5,82 @@
 package dep
 
 import (
-	"fmt"
-	"log"
+	"go/build"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/Masterminds/vcs"
-	"github.com/golang/dep/internal/fs"
-	"github.com/golang/dep/internal/gps"
 	"github.com/pkg/errors"
+	"github.com/sdboyer/gps"
 )
 
-/*
-Ctx defines the supporting context of the tool.
-A properly initialized Ctx has a GOPATH containing WorkingDir, and non-nil Loggers.
-
-	ctx := &dep.Ctx{
-		WorkingDir: gopath + "/src/project/root",
-		GOPATH: gopath,
-		Out: log.New(os.Stdout, "", 0),
-		Err: log.New(os.Stderr, "", 0),
-	}
-
-SetPaths assists with setting consistent path fields.
-
-	ctx := &dep.Ctx{
-		Out: log.New(os.Stdout, "", 0),
-		Err: log.New(os.Stderr, "", 0),
-	}
-	err := ctx.SetPaths(projectRootPath, filepath.SplitList(os.Getenv("GOPATH"))
-	if err != nil {
-		// projectRootPath not in any GOPATH
-	}
-
-*/
+// Ctx defines the supporting context of the tool.
 type Ctx struct {
-	WorkingDir string      // Where to execute.
-	GOPATH     string      // Selected Go path, containing WorkingDir.
-	GOPATHS    []string    // Other Go paths.
-	Out, Err   *log.Logger // Required loggers.
-	Verbose    bool        // Enables more verbose logging.
+	GOPATH  string   // Selected Go path
+	GOPATHS []string // Other Go paths
 }
 
-/*
-SetPaths sets the WorkingDir, GOPATH, and GOPATHS fields.
-It selects the GOPATH containing WorkingDir, or returns an error if none is found.
+// NewContext creates a struct with the project's GOPATH. It assumes
+// that of your "GOPATH"'s we want the one we are currently in.
+func NewContext() (*Ctx, error) {
+	// this way we get the default GOPATH that was added in 1.8
+	buildContext := build.Default
+	wd, err := os.Getwd()
 
-	err := ctx.SetPaths(projectRootPath, filepath.SplitList(os.Getenv("GOPATH"))
 	if err != nil {
-		// project root not in any GOPATH
+		return nil, errors.Wrap(err, "getting work directory")
 	}
+	wd = filepath.FromSlash(wd)
+	ctx := &Ctx{}
 
-The default GOPATH is checked when none are provided.
-
-	err := ctx.SetPaths(projectRootPath)
-	if err != nil {
-		// project root not in default GOPATH, or none available
-	}
-
-*/
-func (c *Ctx) SetPaths(workingDir string, gopaths ...string) error {
-	c.WorkingDir = workingDir
-	if len(gopaths) == 0 {
-		d := defaultGOPATH()
-		if d == "" {
-			return errors.New("no default GOPATH available")
-		}
-		gopaths = []string{d}
-	}
-	wd := filepath.FromSlash(workingDir)
-	for _, gp := range gopaths {
+	for _, gp := range filepath.SplitList(buildContext.GOPATH) {
 		gp = filepath.FromSlash(gp)
 
-		if fs.HasFilepathPrefix(wd, gp) {
-			c.GOPATH = gp
+		if filepath.HasPrefix(wd, gp) {
+			ctx.GOPATH = gp
 		}
 
-		c.GOPATHS = append(c.GOPATHS, gp)
+		ctx.GOPATHS = append(ctx.GOPATHS, gp)
 	}
 
-	if c.GOPATH == "" {
-		return fmt.Errorf("%q not in any GOPATH", wd)
+	if ctx.GOPATH == "" {
+		return nil, errors.New("project not in a GOPATH")
 	}
 
-	return nil
-}
-
-// defaultGOPATH gets the default GOPATH that was added in 1.8
-// copied from go/build/build.go
-func defaultGOPATH() string {
-	env := "HOME"
-	if runtime.GOOS == "windows" {
-		env = "USERPROFILE"
-	} else if runtime.GOOS == "plan9" {
-		env = "home"
-	}
-	if home := os.Getenv(env); home != "" {
-		def := filepath.Join(home, "go")
-		if def == runtime.GOROOT() {
-			// Don't set the default GOPATH to GOROOT,
-			// as that will trigger warnings from the go tool.
-			return ""
-		}
-		return def
-	}
-	return ""
+	return ctx, nil
 }
 
 func (c *Ctx) SourceManager() (*gps.SourceMgr, error) {
 	return gps.NewSourceManager(filepath.Join(c.GOPATH, "pkg", "dep"))
 }
 
-// LoadProject starts from the current working directory and searches up the
-// directory tree for a project root.  The search stops when a file with the name
-// ManifestName (Gopkg.toml, by default) is located.
+// LoadProject takes a path and searches up the directory tree for
+// a project root.  If an absolute path is given, the search begins in that
+// directory.  If a relative or empty path is given, the search start is computed
+// from the current working directory.  The search stops when a file with the
+// name ManifestName (Gopkg.toml, by default) is located.
 //
 // The Project contains the parsed manifest as well as a parsed lock file, if
 // present.  The import path is calculated as the remaining path segment
 // below Ctx.GOPATH/src.
-func (c *Ctx) LoadProject() (*Project, error) {
+func (c *Ctx) LoadProject(path string) (*Project, error) {
 	var err error
 	p := new(Project)
 
-	p.AbsRoot, err = findProjectRoot(c.WorkingDir)
+	if path != "" {
+		path, err = filepath.Abs(path)
+		if err != nil {
+			return nil, err
+		}
+	}
+	switch path {
+	case "":
+		p.AbsRoot, err = findProjectRootFromWD()
+	default:
+		p.AbsRoot, err = findProjectRoot(path)
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -159,11 +110,7 @@ func (c *Ctx) LoadProject() (*Project, error) {
 	}
 	defer mf.Close()
 
-	var warns []error
-	p.Manifest, warns, err = readManifest(mf)
-	for _, warn := range warns {
-		c.Err.Printf("dep: WARNING: %v\n", warn)
-	}
+	p.Manifest, err = readManifest(mf)
 	if err != nil {
 		return nil, errors.Errorf("error while parsing %s: %s", mp, err)
 	}
@@ -217,7 +164,7 @@ func (c *Ctx) resolveProjectRoot(path string) (string, error) {
 	// Determine if the symlink is within any of the GOPATHs, in which case we're not
 	// sure how to resolve it.
 	for _, gp := range c.GOPATHS {
-		if fs.HasFilepathPrefix(path, gp) {
+		if filepath.HasPrefix(path, gp) {
 			return "", errors.Errorf("'%s' is linked to another path within a GOPATH (%s)", path, gp)
 		}
 	}
@@ -232,11 +179,7 @@ func (c *Ctx) resolveProjectRoot(path string) (string, error) {
 // The second returned string indicates which GOPATH value was used.
 func (c *Ctx) SplitAbsoluteProjectRoot(path string) (string, error) {
 	srcprefix := filepath.Join(c.GOPATH, "src") + string(filepath.Separator)
-	if fs.HasFilepathPrefix(path, srcprefix) {
-		if len(path) <= len(srcprefix) {
-			return "", errors.New("dep does not currently support using $GOPATH/src as the project root.")
-		}
-
+	if filepath.HasPrefix(path, srcprefix) {
 		// filepath.ToSlash because we're dealing with an import path now,
 		// not an fs path
 		return filepath.ToSlash(path[len(srcprefix):]), nil
@@ -250,7 +193,7 @@ func (c *Ctx) SplitAbsoluteProjectRoot(path string) (string, error) {
 // package directory needs to exist.
 func (c *Ctx) absoluteProjectRoot(path string) (string, error) {
 	posspath := filepath.Join(c.GOPATH, "src", path)
-	dirOK, err := fs.IsDir(posspath)
+	dirOK, err := IsDir(posspath)
 	if err != nil {
 		return "", errors.Wrapf(err, "checking if %s is a directory", posspath)
 	}

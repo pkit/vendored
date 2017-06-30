@@ -3,53 +3,29 @@ language: go
 sudo: false
 notifications:
   email: false
-jobs:
+matrix:
   include:
-    - stage: test
-      install:
-        - go get -u honnef.co/go/tools/cmd/{gosimple,staticcheck}
-        - npm install -g codeclimate-test-reporter
-      env:
-        - DEPTESTBYPASS501=1
-      os: linux
-      go: 1.8.x
-      script:
-        - go build -v ./cmd/dep
-        - PKGS=$(go list ./... | grep -v /vendor/)
-        - go vet $PKGS
-        - staticcheck $PKGS
-        - gosimple $PKGS
-        - ./hack/validate-vendor.bash
-        - go build ./hack/licenseok
-        - find . -path ./vendor -prune -o -type f -name "*.go" -printf '%P\n' | xargs ./licenseok
-        - set -e; for pkg in $PKGS; do go test -race -coverprofile=profile.out -covermode=atomic $pkg; if [[ -f profile.out ]]; then cat profile.out >> coverage.txt; rm profile.out; fi; done
-      after_success:
-        - codeclimate-test-reporter < coverage.txt
-    # YAML alias, for settings shared across the simpler builds
-    - &simple-test
+    - os: linux
       go: 1.7.x
-      stage: test
-      install: skip
-      env:
-        - DEPTESTBYPASS501=1
-      script: go test -race $(go list ./... | grep -v vendor)
-    - <<: *simple-test
-      go: tip
-    - <<: *simple-test
-      os: osx
+    - os: linux
       go: 1.8.x
-      install:
-        # brew takes horribly long to update itself despite the above caching
-        # attempt; only bzr install if it's not on the $PATH
-        - test $(which bzr) || brew install bzr
-      env:
-        - HOMEBREW_NO_AUTO_UPDATE=1
-        - DEPTESTBYPASS501=1
-      script:
-        # OSX as of El Capitan sets an exit trap that interacts poorly with how
-        # travis seems to spawn these shells; if set -e is set, then it can cause
-        # build failures. We're not doing that here, but retain the trap statement
-        # for future safety.
-        # Related: https://superuser.com/questions/1044130/why-am-i-having-how-can-i-fix-this-error-shell-session-update-command-not-f
-        - trap EXIT
-        - go test -race $(go list ./... | grep -v vendor)
+    - os: linux
+      go: tip
+    - os: osx
+      go: 1.8.x
+install:
+  - echo "This is an override of the default install deps step in travis."
+before_script:
+  - PKGS=$(go list ./... | grep -v /vendor/)
+  - go get -v honnef.co/go/tools/cmd/staticcheck
+script:
+  - go build -v ./cmd/dep
+  - go vet $PKGS
+  # Ignore the deprecation warning about filepath.HasPrefix (SA1019). This flag
+  # can be removed when issue #296 is resolved.
+  - staticcheck -ignore='github.com/golang/dep/context.go:SA1019 github.com/golang/dep/cmd/dep/init.go:SA1019' $PKGS
+  - test -z "$(gofmt -s -l . 2>&1 | grep -v vendor/ | tee /dev/stderr)"
+  - go test -race $PKGS
+  - go build ./hack/licenseok
+  - find . -path ./vendor -prune -o -type f -name "*.go" -printf '%P\n' | xargs ./licenseok
+  - ./hack/validate-vendor.bash

@@ -1,0 +1,57 @@
+<!-- Mobile Side Navigation -->
+<nav class="mobile_expanded" role="navigation">
+    <a href="{{ "/frequently-asked-questions.html" | relative_url }}" class="menu-item" data-proofer-ignore>FAQ</a>
+    <div class="mobile-menu-products">
+  		Product
+  		<a href="https://www.cockroachlabs.com/product/cockroachdb-core/" data-proofer-ignore>CockroachDB Core</a>
+  		<a href="https://www.cockroachlabs.com/product/cockroachdb-enterprise/" data-proofer-ignore>CockroachDB Enterprise</a>
+  	</div>
+    <a href="{{ "/" | relative_url }}" class="menu-item" data-proofer-ignore>Docs</a>
+    <a href="https://www.cockroachlabs.com/community/" class="menu-item" data-proofer-ignore>Community</a>
+    <a href="https://www.cockroachlabs.com/about/" class="menu-item" data-proofer-ignore>About</a>
+    <a href="https://www.cockroachlabs.com/blog/" class="menu-item" data-proofer-ignore>Blog</a>
+    <a href="{{ "/install-cockroachdb.html" | relative_url }}" class="menu-item" data-proofer-ignore>Install</a>
+</nav>
+
+<!-- Desktop / Tablet Navigation -->
+<header class="navbar-fixed-top">
+    <div class="container">
+        <div class="row">
+            <a class="logo" href="/" title="Cockroach Labs">
+                <img src="{{ 'images/CL_Logo_Horizontal.png' | relative_url }}" width="100%" alt="Cockroach Labs" />
+            </a>
+
+            <nav class="desktop" role="navigation">
+                <a href="{{ "/frequently-asked-questions.html" | relative_url }}" class="menu-item {% if page.url == "/frequently-asked-questions.html" %}current-menu-item{% endif %}" data-proofer-ignore>FAQ</a>
+                <div class="menu-item-products menu-item">
+          				Product
+          				<div class="products-dropdown">
+          					<a href="https://www.cockroachlabs.com/product/cockroachdb-core/" data-proofer-ignore>
+          						<div class="products-dropdown__title">CockroachDB Core</div>
+          						<div class="products-dropdown__info">A cloud-native SQL database designed to grow with you.</div>
+          					</a>
+          					<a href="https://www.cockroachlabs.com/product/cockroachdb-enterprise/" data-proofer-ignore>
+          						<div class="products-dropdown__title">CockroachDB Enterprise</div>
+          						<div class="products-dropdown__info">A cloud-native SQL database built for global businesses.</div>
+          					</a>
+          				</div>
+          			</div>
+                <a href="{{ "/" | relative_url }}" class="menu-item {% if page.url != "/frequently-asked-questions.html" %}current-menu-item{% endif %}" data-proofer-ignore>Docs</a>
+                <a href="https://www.cockroachlabs.com/community/" class="menu-item" data-proofer-ignore>Community</a>
+                <a href="https://www.cockroachlabs.com/about/" class="menu-item" data-proofer-ignore>About</a>
+                <a href="https://www.cockroachlabs.com/blog/" class="menu-item" data-proofer-ignore>Blog</a>
+                <a href="{{ "/install-cockroachdb.html" | relative_url }}" class="button--header menu-item" data-proofer-ignore>Install</a>
+            </nav>
+            <nav class="mobile" role="navigation">
+                <a href="#" title="Expand Menu" class="hamburger">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </a>
+                <a target="_blank" href="{{ "/install-cockroachdb.html" | relative_url }}" class="button--header menu-item" data-proofer-ignore>Install</a>
+            </nav>
+
+        </div>
+    </div>
+</header>

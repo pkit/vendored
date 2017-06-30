@@ -5,45 +5,26 @@
 package dep
 
 import (
-	"bytes"
 	"encoding/hex"
 	"io"
 	"sort"
 
-	"github.com/golang/dep/internal/gps"
+	"bytes"
 	"github.com/pelletier/go-toml"
 	"github.com/pkg/errors"
+	"github.com/sdboyer/gps"
 )
 
-// LockName is the lock file name used by dep.
 const LockName = "Gopkg.lock"
 
-// Lock holds lock file data and implements gps.Lock.
 type Lock struct {
-	SolveMeta SolveMeta
-	P         []gps.LockedProject
-}
-
-// SolveMeta holds solver meta data.
-type SolveMeta struct {
-	InputsDigest    []byte
-	AnalyzerName    string
-	AnalyzerVersion int
-	SolverName      string
-	SolverVersion   int
+	Memo []byte
+	P    []gps.LockedProject
 }
 
 type rawLock struct {
-	SolveMeta solveMeta          `toml:"solve-meta"`
-	Projects  []rawLockedProject `toml:"projects"`
-}
-
-type solveMeta struct {
-	InputsDigest    string `toml:"inputs-digest"`
-	AnalyzerName    string `toml:"analyzer-name"`
-	AnalyzerVersion int    `toml:"analyzer-version"`
-	SolverName      string `toml:"solver-name"`
-	SolverVersion   int    `toml:"solver-version"`
+	Memo     string             `toml:"memo"`
+	Projects []rawLockedProject `toml:"projects"`
 }
 
 type rawLockedProject struct {
@@ -77,15 +58,10 @@ func fromRawLock(raw rawLock) (*Lock, error) {
 		P: make([]gps.LockedProject, len(raw.Projects)),
 	}
 
-	l.SolveMeta.InputsDigest, err = hex.DecodeString(raw.SolveMeta.InputsDigest)
+	l.Memo, err = hex.DecodeString(raw.Memo)
 	if err != nil {
 		return nil, errors.Errorf("invalid hash digest in lock's memo field")
 	}
-
-	l.SolveMeta.AnalyzerName = raw.SolveMeta.AnalyzerName
-	l.SolveMeta.AnalyzerVersion = raw.SolveMeta.AnalyzerVersion
-	l.SolveMeta.SolverName = raw.SolveMeta.SolverName
-	l.SolveMeta.SolverVersion = raw.SolveMeta.SolverVersion
 
 	for i, ld := range raw.Projects {
 		r := gps.Revision(ld.Revision)
@@ -108,16 +84,13 @@ func fromRawLock(raw rawLock) (*Lock, error) {
 		}
 		l.P[i] = gps.NewLockedProject(id, v, ld.Packages)
 	}
-
 	return l, nil
 }
 
-// InputHash returns the hash of inputs which produced this lock data.
 func (l *Lock) InputHash() []byte {
-	return l.SolveMeta.InputsDigest
+	return l.Memo
 }
 
-// Projects returns the list of LockedProjects contained in the lock data.
 func (l *Lock) Projects() []gps.LockedProject {
 	return l.P
 }
@@ -125,13 +98,7 @@ func (l *Lock) Projects() []gps.LockedProject {
 // toRaw converts the manifest into a representation suitable to write to the lock file
 func (l *Lock) toRaw() rawLock {
 	raw := rawLock{
-		SolveMeta: solveMeta{
-			InputsDigest:    hex.EncodeToString(l.SolveMeta.InputsDigest),
-			AnalyzerName:    l.SolveMeta.AnalyzerName,
-			AnalyzerVersion: l.SolveMeta.AnalyzerVersion,
-			SolverName:      l.SolveMeta.SolverName,
-			SolverVersion:   l.SolveMeta.SolverVersion,
-		},
+		Memo:     hex.EncodeToString(l.Memo),
 		Projects: make([]rawLockedProject, len(l.P)),
 	}
 
@@ -146,45 +113,72 @@ func (l *Lock) toRaw() rawLock {
 		}
 
 		v := lp.Version()
-		ld.Revision, ld.Branch, ld.Version = gps.VersionComponentStrings(v)
+		ld.Revision, ld.Branch, ld.Version = getVersionInfo(v)
 
 		raw.Projects[k] = ld
 	}
 
+	// TODO sort output - #15
+
 	return raw
 }
 
-// MarshalTOML serializes this lock into TOML via an intermediate raw form.
 func (l *Lock) MarshalTOML() ([]byte, error) {
 	raw := l.toRaw()
 	result, err := toml.Marshal(raw)
 	return result, errors.Wrap(err, "Unable to marshal lock to TOML string")
 }
 
-// LockFromSolution converts a gps.Solution to dep's representation of a lock.
+// TODO(carolynvs) this should be moved to gps
+func getVersionInfo(v gps.Version) (revision string, branch string, version string) {
+	// Figure out how to get the underlying revision
+	switch tv := v.(type) {
+	case gps.UnpairedVersion:
+	// TODO we could error here, if we want to be very defensive about not
+	// allowing a lock to be written if without an immmutable revision
+	case gps.Revision:
+		revision = tv.String()
+	case gps.PairedVersion:
+		revision = tv.Underlying().String()
+	}
+
+	switch v.Type() {
+	case gps.IsBranch:
+		branch = v.String()
+	case gps.IsSemver, gps.IsVersion:
+		version = v.String()
+	}
+
+	return
+}
+
+// LockFromInterface converts an arbitrary gps.Lock to dep's representation of a
+// lock. If the input is already dep's *lock, the input is returned directly.
 //
 // Data is defensively copied wherever necessary to ensure the resulting *lock
 // shares no memory with the original lock.
-func LockFromSolution(in gps.Solution) *Lock {
+//
+// As gps.Solution is a superset of gps.Lock, this can also be used to convert
+// solutions to dep's lock format.
+func LockFromInterface(in gps.Lock) *Lock {
+	if in == nil {
+		return nil
+	} else if l, ok := in.(*Lock); ok {
+		return l
+	}
+
 	h, p := in.InputHash(), in.Projects()
 
 	l := &Lock{
-		SolveMeta: SolveMeta{
-			InputsDigest:    make([]byte, len(h)),
-			AnalyzerName:    in.AnalyzerName(),
-			AnalyzerVersion: in.AnalyzerVersion(),
-			SolverName:      in.SolverName(),
-			SolverVersion:   in.SolverVersion(),
-		},
-		P: make([]gps.LockedProject, len(p)),
+		Memo: make([]byte, len(h)),
+		P:    make([]gps.LockedProject, len(p)),
 	}
 
-	copy(l.SolveMeta.InputsDigest, h)
+	copy(l.Memo, h)
 	copy(l.P, p)
 	return l
 }
 
-// SortedLockedProjects implements sort.Interface.
 type SortedLockedProjects []gps.LockedProject
 
 func (s SortedLockedProjects) Len() int      { return len(s) }

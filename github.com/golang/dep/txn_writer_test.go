@@ -5,13 +5,11 @@
 package dep
 
 import (
-	"io/ioutil"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/golang/dep/internal/test"
+	"github.com/golang/dep/test"
 	"github.com/pkg/errors"
 )
 
@@ -25,8 +23,10 @@ func TestSafeWriter_BadInput_MissingRoot(t *testing.T) {
 	pc := NewTestProjectContext(h, safeWriterProject)
 	defer pc.Release()
 
-	sw, _ := NewSafeWriter(nil, nil, nil, VendorOnChanged)
-	err := sw.Write("", pc.SourceManager, true)
+	var sw SafeWriter
+	sw.Prepare(nil, nil, nil, VendorOnChanged)
+
+	err := sw.Write("", pc.SourceManager)
 
 	if err == nil {
 		t.Fatal("should have errored without a root path, but did not")
@@ -43,8 +43,10 @@ func TestSafeWriter_BadInput_MissingSourceManager(t *testing.T) {
 	pc.CopyFile(LockName, safeWriterGoldenLock)
 	pc.Load()
 
-	sw, _ := NewSafeWriter(nil, nil, pc.Project.Lock, VendorAlways)
-	err := sw.Write(pc.Project.AbsRoot, nil, true)
+	var sw SafeWriter
+	sw.Prepare(nil, nil, pc.Project.Lock, VendorAlways)
+
+	err := sw.Write(pc.Project.AbsRoot, nil)
 
 	if err == nil {
 		t.Fatal("should have errored without a source manager when forceVendor is true, but did not")
@@ -59,7 +61,9 @@ func TestSafeWriter_BadInput_ForceVendorMissingLock(t *testing.T) {
 	pc := NewTestProjectContext(h, safeWriterProject)
 	defer pc.Release()
 
-	_, err := NewSafeWriter(nil, nil, nil, VendorAlways)
+	var sw SafeWriter
+	err := sw.Prepare(nil, nil, nil, VendorAlways)
+
 	if err == nil {
 		t.Fatal("should have errored without a lock when forceVendor is true, but did not")
 	} else if !strings.Contains(err.Error(), "newLock") {
@@ -75,7 +79,9 @@ func TestSafeWriter_BadInput_OldLockOnly(t *testing.T) {
 	pc.CopyFile(LockName, safeWriterGoldenLock)
 	pc.Load()
 
-	_, err := NewSafeWriter(nil, pc.Project.Lock, nil, VendorAlways)
+	var sw SafeWriter
+	err := sw.Prepare(nil, pc.Project.Lock, nil, VendorAlways)
+
 	if err == nil {
 		t.Fatal("should have errored with only an old lock, but did not")
 	} else if !strings.Contains(err.Error(), "oldLock") {
@@ -89,10 +95,11 @@ func TestSafeWriter_BadInput_NonexistentRoot(t *testing.T) {
 	pc := NewTestProjectContext(h, safeWriterProject)
 	defer pc.Release()
 
-	sw, _ := NewSafeWriter(nil, nil, nil, VendorOnChanged)
+	var sw SafeWriter
+	sw.Prepare(nil, nil, nil, VendorOnChanged)
 
 	missingroot := filepath.Join(pc.Project.AbsRoot, "nonexistent")
-	err := sw.Write(missingroot, pc.SourceManager, true)
+	err := sw.Write(missingroot, pc.SourceManager)
 
 	if err == nil {
 		t.Fatal("should have errored with nonexistent dir for root path, but did not")
@@ -107,10 +114,11 @@ func TestSafeWriter_BadInput_RootIsFile(t *testing.T) {
 	pc := NewTestProjectContext(h, safeWriterProject)
 	defer pc.Release()
 
-	sw, _ := NewSafeWriter(nil, nil, nil, VendorOnChanged)
+	var sw SafeWriter
+	sw.Prepare(nil, nil, nil, VendorOnChanged)
 
 	fileroot := pc.CopyFile("fileroot", "txn_writer/badinput_fileroot")
-	err := sw.Write(fileroot, pc.SourceManager, true)
+	err := sw.Write(fileroot, pc.SourceManager)
 
 	if err == nil {
 		t.Fatal("should have errored when root path is a file, but did not")
@@ -131,21 +139,22 @@ func TestSafeWriter_Manifest(t *testing.T) {
 	pc.CopyFile(ManifestName, safeWriterGoldenManifest)
 	pc.Load()
 
-	sw, _ := NewSafeWriter(pc.Project.Manifest, nil, nil, VendorOnChanged)
+	var sw SafeWriter
+	sw.Prepare(pc.Project.Manifest, nil, nil, VendorOnChanged)
 
 	// Verify prepared actions
-	if !sw.HasManifest() {
+	if !sw.Payload.HasManifest() {
 		t.Fatal("Expected the payload to contain the manifest")
 	}
-	if sw.HasLock() {
+	if sw.Payload.HasLock() {
 		t.Fatal("Did not expect the payload to contain the lock")
 	}
-	if sw.writeVendor {
+	if sw.Payload.HasVendor() {
 		t.Fatal("Did not expect the payload to contain the vendor directory")
 	}
 
 	// Write changes
-	err := sw.Write(pc.Project.AbsRoot, pc.SourceManager, true)
+	err := sw.Write(pc.Project.AbsRoot, pc.SourceManager)
 	h.Must(errors.Wrap(err, "SafeWriter.Write failed"))
 
 	// Verify file system changes
@@ -173,21 +182,22 @@ func TestSafeWriter_ManifestAndUnmodifiedLock(t *testing.T) {
 	pc.CopyFile(LockName, safeWriterGoldenLock)
 	pc.Load()
 
-	sw, _ := NewSafeWriter(pc.Project.Manifest, pc.Project.Lock, pc.Project.Lock, VendorOnChanged)
+	var sw SafeWriter
+	sw.Prepare(pc.Project.Manifest, pc.Project.Lock, pc.Project.Lock, VendorOnChanged)
 
 	// Verify prepared actions
-	if !sw.HasManifest() {
+	if !sw.Payload.HasManifest() {
 		t.Fatal("Expected the payload to contain the manifest")
 	}
-	if !sw.HasLock() {
+	if !sw.Payload.HasLock() {
 		t.Fatal("Expected the payload to contain the lock.")
 	}
-	if sw.writeVendor {
+	if sw.Payload.HasVendor() {
 		t.Fatal("Did not expect the payload to contain the vendor directory")
 	}
 
 	// Write changes
-	err := sw.Write(pc.Project.AbsRoot, pc.SourceManager, true)
+	err := sw.Write(pc.Project.AbsRoot, pc.SourceManager)
 	h.Must(errors.Wrap(err, "SafeWriter.Write failed"))
 
 	// Verify file system changes
@@ -215,21 +225,22 @@ func TestSafeWriter_ManifestAndUnmodifiedLockWithForceVendor(t *testing.T) {
 	pc.CopyFile(LockName, safeWriterGoldenLock)
 	pc.Load()
 
-	sw, _ := NewSafeWriter(pc.Project.Manifest, pc.Project.Lock, pc.Project.Lock, VendorAlways)
+	var sw SafeWriter
+	sw.Prepare(pc.Project.Manifest, pc.Project.Lock, pc.Project.Lock, VendorAlways)
 
 	// Verify prepared actions
-	if !sw.HasManifest() {
+	if !sw.Payload.HasManifest() {
 		t.Fatal("Expected the payload to contain the manifest")
 	}
-	if !sw.HasLock() {
+	if !sw.Payload.HasLock() {
 		t.Fatal("Expected the payload to contain the lock")
 	}
-	if !sw.writeVendor {
+	if !sw.Payload.HasVendor() {
 		t.Fatal("Expected the payload to contain the vendor directory")
 	}
 
 	// Write changes
-	err := sw.Write(pc.Project.AbsRoot, pc.SourceManager, true)
+	err := sw.Write(pc.Project.AbsRoot, pc.SourceManager)
 	h.Must(errors.Wrap(err, "SafeWriter.Write failed"))
 
 	// Verify file system changes
@@ -259,24 +270,25 @@ func TestSafeWriter_ModifiedLock(t *testing.T) {
 	pc.CopyFile(LockName, safeWriterGoldenLock)
 	pc.Load()
 
+	var sw SafeWriter
 	originalLock := new(Lock)
 	*originalLock = *pc.Project.Lock
-	originalLock.SolveMeta.InputsDigest = []byte{} // zero out the input hash to ensure non-equivalency
-	sw, _ := NewSafeWriter(nil, originalLock, pc.Project.Lock, VendorOnChanged)
+	originalLock.Memo = []byte{} // zero out the input hash to ensure non-equivalency
+	sw.Prepare(nil, originalLock, pc.Project.Lock, VendorOnChanged)
 
 	// Verify prepared actions
-	if sw.HasManifest() {
-		t.Fatal("Did not expect the manifest to be written")
+	if sw.Payload.HasManifest() {
+		t.Fatal("Did not expect the payload to contain the manifest")
 	}
-	if !sw.HasLock() {
-		t.Fatal("Expected that the writer should plan to write the lock")
+	if !sw.Payload.HasLock() {
+		t.Fatal("Expected the payload to contain the lock")
 	}
-	if !sw.writeVendor {
-		t.Fatal("Expected that the writer should plan to write the vendor directory")
+	if !sw.Payload.HasVendor() {
+		t.Fatal("Expected the payload to contain the vendor directory")
 	}
 
 	// Write changes
-	err := sw.Write(pc.Project.AbsRoot, pc.SourceManager, true)
+	err := sw.Write(pc.Project.AbsRoot, pc.SourceManager)
 	h.Must(errors.Wrap(err, "SafeWriter.Write failed"))
 
 	// Verify file system changes
@@ -306,24 +318,25 @@ func TestSafeWriter_ModifiedLockSkipVendor(t *testing.T) {
 	pc.CopyFile(LockName, safeWriterGoldenLock)
 	pc.Load()
 
+	var sw SafeWriter
 	originalLock := new(Lock)
 	*originalLock = *pc.Project.Lock
-	originalLock.SolveMeta.InputsDigest = []byte{} // zero out the input hash to ensure non-equivalency
-	sw, _ := NewSafeWriter(nil, originalLock, pc.Project.Lock, VendorNever)
+	originalLock.Memo = []byte{} // zero out the input hash to ensure non-equivalency
+	sw.Prepare(nil, originalLock, pc.Project.Lock, VendorNever)
 
 	// Verify prepared actions
-	if sw.HasManifest() {
+	if sw.Payload.HasManifest() {
 		t.Fatal("Did not expect the payload to contain the manifest")
 	}
-	if !sw.HasLock() {
+	if !sw.Payload.HasLock() {
 		t.Fatal("Expected the payload to contain the lock")
 	}
-	if sw.writeVendor {
+	if sw.Payload.HasVendor() {
 		t.Fatal("Did not expect the payload to contain the vendor directory")
 	}
 
 	// Write changes
-	err := sw.Write(pc.Project.AbsRoot, pc.SourceManager, true)
+	err := sw.Write(pc.Project.AbsRoot, pc.SourceManager)
 	h.Must(errors.Wrap(err, "SafeWriter.Write failed"))
 
 	// Verify file system changes
@@ -350,23 +363,25 @@ func TestSafeWriter_ForceVendorWhenVendorAlreadyExists(t *testing.T) {
 	pc.CopyFile(LockName, safeWriterGoldenLock)
 	pc.Load()
 
-	sw, _ := NewSafeWriter(nil, pc.Project.Lock, pc.Project.Lock, VendorAlways)
-	err := sw.Write(pc.Project.AbsRoot, pc.SourceManager, true)
+	var sw SafeWriter
+	// Populate vendor
+	sw.Prepare(nil, pc.Project.Lock, pc.Project.Lock, VendorAlways)
+	err := sw.Write(pc.Project.AbsRoot, pc.SourceManager)
 	h.Must(errors.Wrap(err, "SafeWriter.Write failed"))
 
 	// Verify prepared actions
-	sw, _ = NewSafeWriter(nil, nil, pc.Project.Lock, VendorAlways)
-	if sw.HasManifest() {
+	sw.Prepare(nil, nil, pc.Project.Lock, VendorAlways)
+	if sw.Payload.HasManifest() {
 		t.Fatal("Did not expect the payload to contain the manifest")
 	}
-	if !sw.HasLock() {
+	if !sw.Payload.HasLock() {
 		t.Fatal("Expected the payload to contain the lock")
 	}
-	if !sw.writeVendor {
+	if !sw.Payload.HasVendor() {
 		t.Fatal("Expected the payload to contain the vendor directory ")
 	}
 
-	err = sw.Write(pc.Project.AbsRoot, pc.SourceManager, true)
+	err = sw.Write(pc.Project.AbsRoot, pc.SourceManager)
 	h.Must(errors.Wrap(err, "SafeWriter.Write failed"))
 
 	// Verify file system changes
@@ -395,25 +410,26 @@ func TestSafeWriter_NewLock(t *testing.T) {
 	defer pc.Release()
 	pc.Load()
 
+	var sw SafeWriter
 	lf := h.GetTestFile(safeWriterGoldenLock)
 	defer lf.Close()
 	newLock, err := readLock(lf)
 	h.Must(err)
-	sw, _ := NewSafeWriter(nil, nil, newLock, VendorOnChanged)
+	sw.Prepare(nil, nil, newLock, VendorOnChanged)
 
 	// Verify prepared actions
-	if sw.HasManifest() {
+	if sw.Payload.HasManifest() {
 		t.Fatal("Did not expect the payload to contain the manifest")
 	}
-	if !sw.HasLock() {
+	if !sw.Payload.HasLock() {
 		t.Fatal("Expected the payload to contain the lock")
 	}
-	if !sw.writeVendor {
+	if !sw.Payload.HasVendor() {
 		t.Fatal("Expected the payload to contain the vendor directory")
 	}
 
 	// Write changes
-	err = sw.Write(pc.Project.AbsRoot, pc.SourceManager, true)
+	err = sw.Write(pc.Project.AbsRoot, pc.SourceManager)
 	h.Must(errors.Wrap(err, "SafeWriter.Write failed"))
 
 	// Verify file system changes
@@ -439,25 +455,26 @@ func TestSafeWriter_NewLockSkipVendor(t *testing.T) {
 	defer pc.Release()
 	pc.Load()
 
+	var sw SafeWriter
 	lf := h.GetTestFile(safeWriterGoldenLock)
 	defer lf.Close()
 	newLock, err := readLock(lf)
 	h.Must(err)
-	sw, _ := NewSafeWriter(nil, nil, newLock, VendorNever)
+	sw.Prepare(nil, nil, newLock, VendorNever)
 
 	// Verify prepared actions
-	if sw.HasManifest() {
+	if sw.Payload.HasManifest() {
 		t.Fatal("Did not expect the payload to contain the manifest")
 	}
-	if !sw.HasLock() {
+	if !sw.Payload.HasLock() {
 		t.Fatal("Expected the payload to contain the lock")
 	}
-	if sw.writeVendor {
+	if sw.Payload.HasVendor() {
 		t.Fatal("Did not expect the payload to contain the vendor directory")
 	}
 
 	// Write changes
-	err = sw.Write(pc.Project.AbsRoot, pc.SourceManager, true)
+	err = sw.Write(pc.Project.AbsRoot, pc.SourceManager)
 	h.Must(errors.Wrap(err, "SafeWriter.Write failed"))
 
 	// Verify file system changes
@@ -489,81 +506,53 @@ func TestSafeWriter_DiffLocks(t *testing.T) {
 	updatedLock, err := readLock(ulf)
 	h.Must(err)
 
-	sw, _ := NewSafeWriter(nil, pc.Project.Lock, updatedLock, VendorOnChanged)
+	var sw SafeWriter
+	sw.Prepare(nil, pc.Project.Lock, updatedLock, VendorOnChanged)
 
 	// Verify lock diff
-	diff := sw.lockDiff
+	diff := sw.Payload.LockDiff
 	if diff == nil {
 		t.Fatal("Expected the payload to contain a diff of the lock files")
 	}
+	if diff.HashDiff == nil {
+		t.Fatalf("Expected the lock diff to contain the updated hash: expected %s, got %s", pc.Project.Lock.Memo, updatedLock.Memo)
+	}
 
-	output, err := formatLockDiff(*diff)
+	if len(diff.Add) != 2 {
+		t.Fatalf("Expected the lock diff to contain 2 added projects, got %d", len(diff.Add))
+	} else {
+		add1 := diff.Add[0]
+		if add1.Name != "github.com/sdboyer/deptest" {
+			t.Errorf("expected new project[0] github.com/sdboyer/deptest, got %s", add1.Name)
+		}
+		add2 := diff.Add[1]
+		if add2.Name != "github.com/stuff/realthing" {
+			t.Errorf("expected new project[1] github.com/stuff/realthing, got %s", add2.Name)
+		}
+	}
+
+	if len(diff.Remove) != 1 {
+		t.Fatalf("Expected the lock diff to contain 1 removed project, got %d", len(diff.Remove))
+	} else {
+		remove := diff.Remove[0]
+		if remove.Name != "github.com/stuff/placeholder" {
+			t.Fatalf("expected new project github.com/stuff/placeholder, got %s", remove.Name)
+		}
+	}
+
+	if len(diff.Modify) != 1 {
+		t.Fatalf("Expected the lock diff to contain 1 modified project, got %d", len(diff.Modify))
+	} else {
+		modify := diff.Modify[0]
+		if modify.Name != "github.com/foo/bar" {
+			t.Fatalf("expected new project github.com/foo/bar, got %s", modify.Name)
+		}
+	}
+
+	output, err := diff.Format()
 	h.Must(err)
 	goldenOutput := "txn_writer/expected_diff_output.txt"
 	if err = pc.ShouldMatchGolden(goldenOutput, output); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestHasDotGit(t *testing.T) {
-	// Create a tempdir with .git file
-	td, err := ioutil.TempDir(os.TempDir(), "dotGitFile")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(td)
-
-	os.OpenFile(td+string(filepath.Separator)+".git", os.O_CREATE, 0777)
-	if !hasDotGit(td) {
-		t.Fatal("Expected hasDotGit to find .git")
-	}
-}
-
-func TestSafeWriter_VendorDotGitPreservedWithForceVendor(t *testing.T) {
-	h := test.NewHelper(t)
-	defer h.Cleanup()
-
-	pc := NewTestProjectContext(h, safeWriterProject)
-	defer pc.Release()
-
-	gitDirPath := filepath.Join(pc.Project.AbsRoot, "vendor", ".git")
-	os.MkdirAll(gitDirPath, 0777)
-	dummyFile := filepath.Join("vendor", ".git", "badinput_fileroot")
-	pc.CopyFile(dummyFile, "txn_writer/badinput_fileroot")
-	pc.CopyFile(ManifestName, safeWriterGoldenManifest)
-	pc.CopyFile(LockName, safeWriterGoldenLock)
-	pc.Load()
-
-	sw, _ := NewSafeWriter(pc.Project.Manifest, pc.Project.Lock, pc.Project.Lock, VendorAlways)
-
-	// Verify prepared actions
-	if !sw.HasManifest() {
-		t.Fatal("Expected the payload to contain the manifest")
-	}
-	if !sw.HasLock() {
-		t.Fatal("Expected the payload to contain the lock")
-	}
-	if !sw.writeVendor {
-		t.Fatal("Expected the payload to contain the vendor directory")
-	}
-
-	err := sw.Write(pc.Project.AbsRoot, pc.SourceManager, true)
-	h.Must(errors.Wrap(err, "SafeWriter.Write failed"))
-
-	// Verify file system changes
-	if err := pc.ManifestShouldMatchGolden(safeWriterGoldenManifest); err != nil {
-		t.Fatal(err)
-	}
-	if err := pc.LockShouldMatchGolden(safeWriterGoldenLock); err != nil {
-		t.Fatal(err)
-	}
-	if err := pc.VendorShouldExist(); err != nil {
-		t.Fatal(err)
-	}
-	if err := pc.VendorFileShouldExist("github.com/sdboyer/dep-test"); err != nil {
-		t.Fatal(err)
-	}
-	if err := pc.VendorFileShouldExist(".git/badinput_fileroot"); err != nil {
 		t.Fatal(err)
 	}
 }

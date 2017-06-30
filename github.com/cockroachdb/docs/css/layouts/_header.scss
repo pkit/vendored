@@ -1,0 +1,289 @@
+body.menu_open {
+	overflow:hidden;
+
+	nav.mobile_expanded {
+		overflow-y:auto;
+		display: block;
+	}
+
+	header {
+		margin-left:-200px;
+
+		nav.mobile {
+			.hamburger {
+
+				span {
+					&:nth-child(1), &:nth-child(4) {
+					  top: 8px;
+					  width: 0%;
+					  left: 50%;
+					}
+
+					&:nth-child(2) {
+					  @include rotate(45deg);
+					}
+
+					&:nth-child(3) {
+					  @include rotate(-45deg);
+					}
+				}
+			}
+		}
+	}
+
+	#content, .col-sidebar {
+		margin-left:-200px;
+	}
+}
+
+nav.mobile_expanded {
+	position: fixed;
+	right: 0;
+	top: 0;
+	z-index: 900;
+	width: 200px;
+	overflow: auto;
+	visibility: hidden;
+
+	a {
+		border-bottom: 1px solid $cl_border;
+		@include avenir_h(14px);
+		line-height: 19px;
+		text-transform: uppercase;
+		letter-spacing: 1.6px;
+		width: 100%;
+		float: left;
+		color: $cl_blue;
+		padding:26px 0 30px 20px;
+		text-decoration: none;
+		@include groovy(color);
+	}
+	a:hover, a.current-menu-item {
+		color: $cl_green;
+	}
+	a.current-menu-item {
+		background: #efefef;
+	}
+
+	.mobile-menu-products {
+		float: left;
+		@include avenir_h(14px);
+		letter-spacing: 1.3px;
+		color: $cl_blue;
+		text-transform: uppercase;
+		padding: 25px 0 30px 20px;
+		border-bottom: 1px solid #DADBE2;
+
+		a {
+			position: relative;
+			display: block;
+			@include avenir_h(12px);
+			line-height: 20px;
+			letter-spacing: normal;
+			text-transform: none;
+			border-bottom: none;
+			padding: 25px 0 0 17px;
+
+			&:before {
+				content: '';
+				display: block;
+				position: relative;
+				max-width: inherit;
+				max-height: inherit;
+				left: -17px;
+				top: 10px;
+				width: 10px;
+				height: 2px;
+				background-color: rgba(19,40,72,0.2);
+			}
+		}
+	}
+}
+
+header {
+	width:100%;
+	float:left;
+	background:#fff;
+	padding: 15px;
+	border-bottom: 1px solid $cl_border;
+  @include groovy(all);
+
+	.logo {
+		width:130px;
+		margin-top:5px;
+		float: left;
+		line-height: 20px;
+		font-size: 0;
+
+		@include at-query($min, $screen-sm){
+			width: 160px;
+		}
+
+		@include at-query($screen-sm, $screen-md){
+			line-height: 23px;
+		}
+
+		@include at-query($min, $screen-lg){
+			width:209px;
+		}
+	}
+
+	.container {
+		position:relative;
+	}
+
+	nav.desktop {
+		display:none;
+
+		a:not(.button--header) {
+			@include avenir_h(12px);
+			color: $cl_blue;
+			letter-spacing: 1.3px;
+			text-transform:uppercase;
+			float:left;
+			margin:0 10px;
+			padding:0;
+			line-height: 40px;
+			text-decoration: none;
+			@include groovy(color);
+
+			&.current-menu-item, &:hover {
+				color: $cl_green;
+				text-decoration: none;
+			}
+		}
+
+		@include at-query($min, $screen-sm){
+			display:inline-block;
+			float:right;
+		}
+
+		.products-dropdown {
+			// display: none;
+			position: absolute;
+			max-width: 280px;
+			margin-left: -31px;
+			background-color: #ffffff;
+			border-radius: 5px;
+			box-shadow: 0 5px 10px 0 rgba(0, 0, 0, 0.1), 0 10px 20px 0 rgba(0, 0, 0, 0.1);
+			text-transform: none;
+			letter-spacing: normal;
+			opacity: 0;
+			pointer-events: none;
+			transition: opacity 0.4s ease;
+
+			a {
+				padding: 20px 30px;
+				margin: 0;
+
+				&:first-child {
+					padding-right: 50px;
+					border-bottom: solid 2px #e6e6e6;
+				}
+
+				.products-dropdown {
+					&__title {
+						@include adelle(18px);
+						font-weight: bold;
+						line-height: 30px;
+						color: $cl_blue;
+						text-transform: none;
+						letter-spacing: normal;
+						@include groovy(color);
+					}
+
+					&__info {
+						@include avenir_r(14px);
+						line-height: 20px;
+						color: #4d4d4d;
+						text-transform: none;
+						letter-spacing: normal;
+					}
+				}
+
+				&:hover {
+					.products-dropdown__title {
+						color: $cl_green;
+					}
+				}
+			}
+		}
+
+		.menu-item-products {
+			float: left;
+			margin: 0 10px;
+			padding: 0;
+			@include avenir_h(12px);
+			line-height: 40px;
+			letter-spacing: 1.3px;
+			text-transform: uppercase;
+			@include groovy(color);
+
+			&.current-menu-item {
+				color: $cl_green;
+			}
+
+			&:hover {
+				cursor: pointer;
+				color: $cl_green;
+
+				.products-dropdown {
+					opacity: 1;
+					pointer-events: all;
+				}
+			}
+		}
+	}
+
+	nav.mobile {
+		float:right;
+
+  	.hamburger {
+  		width:21px;
+  		height: 20px;
+  		float:right;
+  		margin-right:5px;
+  		margin-top:5px;
+  		position: relative;
+  		@include rotate(0deg);
+  	 	@include groovy(all);
+
+  	 	span {
+  	 		display: block;
+  	 		position: absolute;
+  	 		background-color: $cl_green;
+  	 		@include rounded(4px);
+  	 		height: 4px;
+  	 		width: 100%;
+  	 		opacity: 1;
+  	 		left: 0;
+  	 		@include rotate(0deg);
+  	 		@include groovy(all);
+
+  	 		&:nth-child(1) {
+		  		top: 0px;
+				}
+
+		 		&:nth-child(2), &:nth-child(3) {
+		  		top: 8px;
+				}
+
+		 		&:nth-child(4) {
+		  		top: 16px;
+				}
+			}
+		}
+
+  	.hamburger:hover {
+  		border-color: $cl_green_hover;
+
+  		.hamburger_inner {
+	  		border-color: $cl_green_hover;
+  		}
+  	}
+
+  	@include at-query($min, $screen-sm){
+  		display: none;
+  	}
+	}
+}

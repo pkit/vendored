@@ -7,11 +7,14 @@ package main
 import (
 	"bytes"
 	"flag"
+	"fmt"
 	"log"
+	"os"
 
 	"github.com/golang/dep"
-	"github.com/golang/dep/internal/gps"
-	"github.com/golang/dep/internal/gps/pkgtree"
+	"github.com/sdboyer/gps"
+	"github.com/sdboyer/gps/pkgtree"
+
 	"github.com/pkg/errors"
 )
 
@@ -36,7 +39,7 @@ func (cmd *pruneCommand) Register(fs *flag.FlagSet) {
 }
 
 func (cmd *pruneCommand) Run(ctx *dep.Ctx, args []string) error {
-	p, err := ctx.LoadProject()
+	p, err := ctx.LoadProject("")
 	if err != nil {
 		return err
 	}
@@ -56,11 +59,15 @@ func (cmd *pruneCommand) Run(ctx *dep.Ctx, args []string) error {
 	}
 
 	// Set up a solver in order to check the InputHash.
-	params := p.MakeParams()
-	params.RootPackageTree = ptree
-
-	if ctx.Verbose {
-		params.TraceLogger = ctx.Err
+	params := gps.SolveParameters{
+		RootDir:         p.AbsRoot,
+		RootPackageTree: ptree,
+		Manifest:        p.Manifest,
+		// Locks aren't a part of the input hash check, so we can omit it.
+	}
+	if *verbose {
+		params.Trace = true
+		params.TraceLogger = log.New(os.Stderr, "", 0)
 	}
 
 	s, err := gps.Prepare(params, sm)
@@ -68,17 +75,9 @@ func (cmd *pruneCommand) Run(ctx *dep.Ctx, args []string) error {
 		return errors.Wrap(err, "could not set up solver for input hashing")
 	}
 
-	if p.Lock == nil {
-		return errors.Errorf("Gopkg.lock must exist for prune to know what files are safe to remove.")
+	if !bytes.Equal(s.HashInputs(), p.Lock.Memo) {
+		return fmt.Errorf("lock hash doesn't match")
 	}
 
-	if !bytes.Equal(s.HashInputs(), p.Lock.SolveMeta.InputsDigest) {
-		return errors.Errorf("Gopkg.lock is out of sync; run dep ensure before pruning.")
-	}
-
-	var pruneLogger *log.Logger
-	if ctx.Verbose {
-		pruneLogger = ctx.Err
-	}
-	return dep.PruneProject(p, sm, pruneLogger)
+	return dep.PruneProject(p, sm)
 }

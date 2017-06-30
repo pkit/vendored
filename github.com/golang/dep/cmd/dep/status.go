@@ -10,14 +10,15 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
+	"os"
 	"sort"
 	"text/tabwriter"
 
 	"github.com/golang/dep"
-	"github.com/golang/dep/internal/gps"
-	"github.com/golang/dep/internal/gps/paths"
-	"github.com/golang/dep/internal/gps/pkgtree"
 	"github.com/pkg/errors"
+	"github.com/sdboyer/gps"
+	"github.com/sdboyer/gps/pkgtree"
 )
 
 const statusShortHelp = `Report the status of the project's dependencies`
@@ -165,7 +166,7 @@ func (out *dotOutput) BasicHeader() {
 	ptree, _ := pkgtree.ListPackages(out.p.AbsRoot, string(out.p.ImportRoot))
 	prm, _ := ptree.ToReachMap(true, false, false, nil)
 
-	out.g.createNode(string(out.p.ImportRoot), "", prm.FlattenFn(paths.IsStandardImportPath))
+	out.g.createNode(string(out.p.ImportRoot), "", prm.Flatten(false))
 }
 
 func (out *dotOutput) BasicFooter() {
@@ -182,7 +183,7 @@ func (out *dotOutput) MissingLine(ms *MissingStatus) {}
 func (out *dotOutput) MissingFooter()                {}
 
 func (cmd *statusCommand) Run(ctx *dep.Ctx, args []string) error {
-	p, err := ctx.LoadProject()
+	p, err := ctx.LoadProject("")
 	if err != nil {
 		return err
 	}
@@ -194,46 +195,26 @@ func (cmd *statusCommand) Run(ctx *dep.Ctx, args []string) error {
 	sm.UseDefaultSignalHandling()
 	defer sm.Release()
 
-	var buf bytes.Buffer
 	var out outputter
 	switch {
 	case cmd.detailed:
 		return errors.Errorf("not implemented")
 	case cmd.json:
 		out = &jsonOutput{
-			w: &buf,
+			w: os.Stdout,
 		}
 	case cmd.dot:
 		out = &dotOutput{
 			p: p,
 			o: cmd.output,
-			w: &buf,
+			w: os.Stdout,
 		}
 	default:
 		out = &tableOutput{
-			w: tabwriter.NewWriter(&buf, 0, 4, 2, ' ', 0),
+			w: tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0),
 		}
 	}
-
-	digestMismatch, hasMissingPkgs, err := runStatusAll(ctx, out, p, sm)
-	if err != nil {
-		return err
-	}
-
-	if digestMismatch {
-		if hasMissingPkgs {
-			ctx.Err.Printf("Lock inputs-digest mismatch due to the following packages missing from the lock:\n\n")
-			ctx.Out.Print(buf.String())
-			ctx.Err.Printf("\nThis happens when a new import is added. Run `dep ensure` to install the missing packages.\n")
-		} else {
-			ctx.Err.Printf("Lock inputs-digest mismatch. This happens when Gopkg.toml is modified.\n" +
-				"Run `dep ensure` to regenerate the inputs-digest.")
-		}
-	} else {
-		ctx.Out.Print(buf.String())
-	}
-
-	return nil
+	return runStatusAll(out, p, sm)
 }
 
 // BasicStatus contains all the information reported about a single dependency
@@ -253,19 +234,17 @@ type MissingStatus struct {
 	MissingPackages []string
 }
 
-func runStatusAll(ctx *dep.Ctx, out outputter, p *dep.Project, sm gps.SourceManager) (bool, bool, error) {
-	var digestMismatch, hasMissingPkgs bool
-
+func runStatusAll(out outputter, p *dep.Project, sm *gps.SourceMgr) error {
 	if p.Lock == nil {
 		// TODO if we have no lock file, do...other stuff
-		return digestMismatch, hasMissingPkgs, nil
+		return nil
 	}
 
 	// While the network churns on ListVersions() requests, statically analyze
 	// code from the current project.
 	ptree, err := pkgtree.ListPackages(p.AbsRoot, string(p.ImportRoot))
 	if err != nil {
-		return digestMismatch, hasMissingPkgs, errors.Errorf("analysis of local packages failed: %v", err)
+		return errors.Errorf("analysis of local packages failed: %v", err)
 	}
 
 	// Set up a solver in order to check the InputHash.
@@ -276,13 +255,14 @@ func runStatusAll(ctx *dep.Ctx, out outputter, p *dep.Project, sm gps.SourceMana
 		Manifest:        p.Manifest,
 		// Locks aren't a part of the input hash check, so we can omit it.
 	}
-	if ctx.Verbose {
-		params.TraceLogger = ctx.Err
+	if *verbose {
+		params.Trace = true
+		params.TraceLogger = log.New(os.Stderr, "", 0)
 	}
 
 	s, err := gps.Prepare(params, sm)
 	if err != nil {
-		return digestMismatch, hasMissingPkgs, errors.Errorf("could not set up solver for input hashing: %s", err)
+		return errors.Errorf("could not set up solver for input hashing: %s", err)
 	}
 
 	cm := collectConstraints(ptree, p, sm)
@@ -293,7 +273,7 @@ func runStatusAll(ctx *dep.Ctx, out outputter, p *dep.Project, sm gps.SourceMana
 	slp := p.Lock.Projects()
 	sort.Sort(dep.SortedLockedProjects(slp))
 
-	if bytes.Equal(s.HashInputs(), p.Lock.SolveMeta.InputsDigest) {
+	if bytes.Equal(s.HashInputs(), p.Lock.Memo) {
 		// If these are equal, we're guaranteed that the lock is a transitively
 		// complete picture of all deps. That eliminates the need for at least
 		// some checks.
@@ -313,11 +293,11 @@ func runStatusAll(ctx *dep.Ctx, out outputter, p *dep.Project, sm gps.SourceMana
 				ptr, err := sm.ListPackages(proj.Ident(), proj.Version())
 
 				if err != nil {
-					return digestMismatch, hasMissingPkgs, fmt.Errorf("analysis of %s package failed: %v", proj.Ident().ProjectRoot, err)
+					return fmt.Errorf("analysis of %s package failed: %v", proj.Ident().ProjectRoot, err)
 				}
 
 				prm, _ := ptr.ToReachMap(true, false, false, nil)
-				bs.Children = prm.FlattenFn(paths.IsStandardImportPath)
+				bs.Children = prm.Flatten(false)
 			}
 
 			// Split apart the version from the lock into its constituent parts
@@ -346,7 +326,7 @@ func runStatusAll(ctx *dep.Ctx, out outputter, p *dep.Project, sm gps.SourceMana
 			// Only if we have a non-rev and non-plain version do/can we display
 			// anything wrt the version's updateability.
 			if bs.Version != nil && bs.Version.Type() != gps.IsVersion {
-				c, has := p.Manifest.Constraints[proj.Ident().ProjectRoot]
+				c, has := p.Manifest.Dependencies[proj.Ident().ProjectRoot]
 				if !has {
 					c.Constraint = gps.Any()
 				}
@@ -375,7 +355,7 @@ func runStatusAll(ctx *dep.Ctx, out outputter, p *dep.Project, sm gps.SourceMana
 		}
 		out.BasicFooter()
 
-		return digestMismatch, hasMissingPkgs, nil
+		return nil
 	}
 
 	// Hash digest mismatch may indicate that some deps are no longer
@@ -384,43 +364,22 @@ func runStatusAll(ctx *dep.Ctx, out outputter, p *dep.Project, sm gps.SourceMana
 	//
 	// It's possible for digests to not match, but still have a correct
 	// lock.
-	digestMismatch = true
+	out.MissingHeader()
+
 	rm, _ := ptree.ToReachMap(true, true, false, nil)
 
-	external := rm.FlattenFn(paths.IsStandardImportPath)
-	roots := make(map[gps.ProjectRoot][]string, len(external))
-
-	type fail struct {
-		ex  string
-		err error
-	}
-	var errs []fail
+	external := rm.Flatten(false)
+	roots := make(map[gps.ProjectRoot][]string)
+	var errs []string
 	for _, e := range external {
 		root, err := sm.DeduceProjectRoot(e)
 		if err != nil {
-			errs = append(errs, fail{
-				ex:  e,
-				err: err,
-			})
+			errs = append(errs, string(root))
 			continue
 		}
 
 		roots[root] = append(roots[root], e)
 	}
-
-	if len(errs) != 0 {
-		// TODO this is just a fix quick so staticcheck doesn't complain.
-		// Visually reconciling failure to deduce project roots with the rest of
-		// the mismatch output is a larger problem.
-		ctx.Err.Printf("Failed to deduce project roots for import paths:\n")
-		for _, fail := range errs {
-			ctx.Err.Printf("\t%s: %s\n", fail.ex, fail.err.Error())
-		}
-
-		return digestMismatch, hasMissingPkgs, errors.New("address issues with undeducible import paths to get more status information")
-	}
-
-	out.MissingHeader()
 
 outer:
 	for root, pkgs := range roots {
@@ -432,12 +391,11 @@ outer:
 			}
 		}
 
-		hasMissingPkgs = true
 		out.MissingLine(&MissingStatus{ProjectRoot: string(root), MissingPackages: pkgs})
 	}
 	out.MissingFooter()
 
-	return digestMismatch, hasMissingPkgs, nil
+	return nil
 }
 
 func formatVersion(v gps.Version) string {
@@ -457,7 +415,7 @@ func formatVersion(v gps.Version) string {
 	return v.String()
 }
 
-func collectConstraints(ptree pkgtree.PackageTree, p *dep.Project, sm gps.SourceManager) map[string][]gps.Constraint {
+func collectConstraints(ptree pkgtree.PackageTree, p *dep.Project, sm *gps.SourceMgr) map[string][]gps.Constraint {
 	// TODO
 	return map[string][]gps.Constraint{}
 }

@@ -1,19 +1,20 @@
-[[constraint]]
+
+[[dependencies]]
   branch = "2.x"
   name = "github.com/Masterminds/semver"
 
-[[constraint]]
+[[dependencies]]
   name = "github.com/Masterminds/vcs"
-  version = "1.11.0"
+  version = "^1.8.0"
 
-[[constraint]]
-  branch = "v2"
-  name = "github.com/go-yaml/yaml"
-
-[[constraint]]
+[[dependencies]]
   branch = "master"
   name = "github.com/pelletier/go-toml"
 
-[[constraint]]
+[[dependencies]]
   name = "github.com/pkg/errors"
-  version = "0.8.0"
+  version = ">=0.8.0, <1.0.0"
+
+[[dependencies]]
+  name = "github.com/sdboyer/gps"
+  version = ">=0.16.0, <1.0.0"

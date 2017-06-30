@@ -7,7 +7,9 @@ package raven
 
 import (
 	"bytes"
+	"go/build"
 	"io/ioutil"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -197,15 +199,25 @@ func fileContext(filename string, line, context int) ([][]byte, int) {
 	return lines[start:end], idx
 }
 
-// trimPath tries to trim the GOROOT or GOPATH prefix off of a filename.
-//
-// We don't use `go/build` here as it will look at the _current_ values,
-// so instead we just assume the last `/src/`.
+var trimPaths []string
+
+// Try to trim the GOROOT or GOPATH prefix off of a filename
 func trimPath(filename string) string {
-	const src = "/src/"
-	prefix := strings.LastIndex(filename, src)
-	if prefix == -1 {
-		return filename
+	for _, prefix := range trimPaths {
+		if trimmed := strings.TrimPrefix(filename, prefix); len(trimmed) < len(filename) {
+			return trimmed
+		}
 	}
-	return filename[prefix+len(src):]
+	return filename
+}
+
+func init() {
+	// Collect all source directories, and make sure they
+	// end in a trailing "separator"
+	for _, prefix := range build.Default.SrcDirs() {
+		if prefix[len(prefix)-1] != filepath.Separator {
+			prefix += string(filepath.Separator)
+		}
+		trimPaths = append(trimPaths, prefix)
+	}
 }

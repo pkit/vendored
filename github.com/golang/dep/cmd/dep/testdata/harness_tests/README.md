@@ -12,7 +12,6 @@ The directory structure is as follows:
                 subcategory1/
                     case1/
                         testcase.json
-                        stdout.txt
                         initial/
                             file1.go
                             Gopkg.toml
@@ -29,7 +28,7 @@ desired.  The test name will consist of the directory path from `testdata` to
 the test case directory itself.  In the above example, the test name would be
 `category1/subcategory1/case1`, and could be singled out with the `-run` option
 of `go test` (i.e.
-`go test github.com/golang/dep/cmd/dep -run Integration/category1/subcategory1/case1`).
+`go test github.com/golang/dep/cmp/dep -run Integration/category1/subcategory1/case1`).
 New tests can be added simply by adding a new directory with the json file to
 the `testdata` tree.  There is no need for code modification - the new test
 will be included automatically.
@@ -37,8 +36,7 @@ will be included automatically.
 The json file needs to be accompanied by `initial` and `final` directories. The
 `initial` is copied verbatim into the test project before the `dep` commands are
 run, are the `manifest` and `lock` files in `final`, if present, are used to
-compare against the test project results after the commands. The `stdout.txt` file
-is optional, and if present will be compared with command output.
+compare against the test project results after the commands.
 
 The `testcase.json` file has the following format:
 
@@ -60,8 +58,7 @@ The `testcase.json` file has the following format:
         "github.com/sdboyer/deptestdos",
         "github.com/sdboyer/deptesttres",
         "github.com/sdboyer/deptestquatro"
-      ],
-      "error-expected": "something went wrong"
+      ]
     }
 
 All of the categories are optional - if the `imports` list for a test is empty,
@@ -75,11 +72,9 @@ The test procedure is as follows:
 4. Fetch the repos and versions in `gopath-initial` into `$TMPDIR/src` directory
 5. Fetch the repos and versions in `vendor-initial` to the project's `vendor` directory
 6. Run `commands` on the project, in declaration order
-7. Ensure that, if any errors are raised, it is only by the final command and their string output matches `error-expected`
-8. Ensure that, if a stdout.txt file is present, the command's output matches (excluding trailing whitespace).
-9. Check the resulting files against those in the `final` input directory
-10. Check the `vendor` directory for the projects listed under `vendor-final`
-11. Check that there were no changes to `src` listings
-12. Clean up
+7. Check the resulting files against those in the `final` input directory
+8. Check the `vendor` directory for the projects listed under `vendor-final`
+9. Check that there were no changes to `src` listings
+10. Clean up
 
 Note that for the remote fetches, only git repos are currently supported.

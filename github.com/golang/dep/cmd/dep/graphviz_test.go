@@ -7,15 +7,13 @@ package main
 import (
 	"testing"
 
-	"github.com/golang/dep/internal/test"
+	"github.com/golang/dep/test"
 )
 
 func TestEmptyProject(t *testing.T) {
-	h := test.NewHelper(t)
-	h.Parallel()
-	defer h.Cleanup()
-
 	g := new(graphviz).New()
+	h := test.NewHelper(t)
+	defer h.Cleanup()
 
 	b := g.output()
 	want := h.GetTestFileString("graphviz/empty.dot")
@@ -26,11 +24,9 @@ func TestEmptyProject(t *testing.T) {
 }
 
 func TestSimpleProject(t *testing.T) {
-	h := test.NewHelper(t)
-	h.Parallel()
-	defer h.Cleanup()
-
 	g := new(graphviz).New()
+	h := test.NewHelper(t)
+	defer h.Cleanup()
 
 	g.createNode("project", "", []string{"foo", "bar"})
 	g.createNode("foo", "master", []string{"bar"})
@@ -44,11 +40,9 @@ func TestSimpleProject(t *testing.T) {
 }
 
 func TestNoLinks(t *testing.T) {
-	h := test.NewHelper(t)
-	h.Parallel()
-	defer h.Cleanup()
-
 	g := new(graphviz).New()
+	h := test.NewHelper(t)
+	defer h.Cleanup()
 
 	g.createNode("project", "", []string{})
 
@@ -60,8 +54,6 @@ func TestNoLinks(t *testing.T) {
 }
 
 func TestIsPathPrefix(t *testing.T) {
-	t.Parallel()
-
 	tcs := []struct {
 		path string
 		pre  string

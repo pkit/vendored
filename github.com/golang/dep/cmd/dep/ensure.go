@@ -9,17 +9,16 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
-	"go/build"
 	"log"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/golang/dep"
-	"github.com/golang/dep/internal/fs"
-	"github.com/golang/dep/internal/gps"
-	"github.com/golang/dep/internal/gps/pkgtree"
 	"github.com/pkg/errors"
+	"github.com/sdboyer/gps"
+	"github.com/sdboyer/gps/pkgtree"
 )
 
 const ensureShortHelp = `Ensure a dependency is safely vendored in the project`
@@ -104,11 +103,11 @@ type ensureCommand struct {
 
 func (cmd *ensureCommand) Run(ctx *dep.Ctx, args []string) error {
 	if cmd.examples {
-		ctx.Err.Println(strings.TrimSpace(ensureExamples))
+		fmt.Fprintln(os.Stderr, strings.TrimSpace(ensureExamples))
 		return nil
 	}
 
-	p, err := ctx.LoadProject()
+	p, err := ctx.LoadProject("")
 	if err != nil {
 		return err
 	}
@@ -121,22 +120,19 @@ func (cmd *ensureCommand) Run(ctx *dep.Ctx, args []string) error {
 	defer sm.Release()
 
 	params := p.MakeParams()
-	if ctx.Verbose {
-		params.TraceLogger = ctx.Err
+	if *verbose {
+		params.Trace = true
+		params.TraceLogger = log.New(os.Stderr, "", 0)
 	}
 	params.RootPackageTree, err = pkgtree.ListPackages(p.AbsRoot, string(p.ImportRoot))
 	if err != nil {
 		return errors.Wrap(err, "ensure ListPackage for project")
 	}
 
-	if err := checkErrors(params.RootPackageTree.Packages); err != nil {
-		return err
-	}
-
 	if cmd.update {
 		applyUpdateArgs(args, &params)
 	} else {
-		err := applyEnsureArgs(ctx.Err, args, cmd.overrides, p, sm, &params)
+		err := applyEnsureArgs(args, cmd.overrides, p, sm, &params)
 		if err != nil {
 			return err
 		}
@@ -154,7 +150,7 @@ func (cmd *ensureCommand) Run(ctx *dep.Ctx, args []string) error {
 
 	// check if vendor exists, because if the locks are the same but
 	// vendor does not exist we should write vendor
-	vendorExists, err := fs.IsNonEmptyDir(filepath.Join(p.AbsRoot, "vendor"))
+	vendorExists, err := dep.IsNonEmptyDir(filepath.Join(p.AbsRoot, "vendor"))
 	if err != nil {
 		return errors.Wrap(err, "ensure vendor is a directory")
 	}
@@ -163,16 +159,19 @@ func (cmd *ensureCommand) Run(ctx *dep.Ctx, args []string) error {
 		writeV = dep.VendorAlways
 	}
 
-	newLock := dep.LockFromSolution(solution)
-	sw, err := dep.NewSafeWriter(nil, p.Lock, newLock, writeV)
-	if err != nil {
-		return err
-	}
-	if cmd.dryRun {
-		return sw.PrintPreparedActions(ctx.Out)
+	var sw dep.SafeWriter
+	var manifest *dep.Manifest
+	if !cmd.update {
+		manifest = p.Manifest
 	}
 
-	return errors.Wrap(sw.Write(p.AbsRoot, sm, false), "grouped write of manifest, lock and vendor")
+	newLock := dep.LockFromInterface(solution)
+	sw.Prepare(manifest, p.Lock, newLock, writeV)
+	if cmd.dryRun {
+		return sw.PrintPreparedActions()
+	}
+
+	return errors.Wrap(sw.Write(p.AbsRoot, sm), "grouped write of manifest, lock and vendor")
 }
 
 func applyUpdateArgs(args []string, params *gps.SolveParameters) {
@@ -188,7 +187,7 @@ func applyUpdateArgs(args []string, params *gps.SolveParameters) {
 	}
 }
 
-func applyEnsureArgs(logger *log.Logger, args []string, overrides stringSlice, p *dep.Project, sm gps.SourceManager, params *gps.SolveParameters) error {
+func applyEnsureArgs(args []string, overrides stringSlice, p *dep.Project, sm *gps.SourceMgr, params *gps.SolveParameters) error {
 	var errs []error
 	for _, arg := range args {
 		pc, err := getProjectConstraint(arg, sm)
@@ -205,14 +204,14 @@ func applyEnsureArgs(logger *log.Logger, args []string, overrides stringSlice, p
 			//
 			// TODO(sdboyer): for this case - or just in general - do we want to
 			// add project args to the requires list temporarily for this run?
-			if _, has := p.Manifest.Constraints[pc.Ident.ProjectRoot]; !has {
-				logger.Printf("dep: No constraint or alternate source specified for %q, omitting from manifest\n", pc.Ident.ProjectRoot)
+			if _, has := p.Manifest.Dependencies[pc.Ident.ProjectRoot]; !has {
+				logf("No constraint or alternate source specified for %q, omitting from manifest", pc.Ident.ProjectRoot)
 			}
 			// If it's already in the manifest, no need to log
 			continue
 		}
 
-		p.Manifest.Constraints[pc.Ident.ProjectRoot] = gps.ProjectProperties{
+		p.Manifest.Dependencies[pc.Ident.ProjectRoot] = gps.ProjectProperties{
 			Source:     pc.Ident.Source,
 			Constraint: pc.Constraint,
 		}
@@ -261,71 +260,77 @@ func (s *stringSlice) Set(value string) error {
 	return nil
 }
 
-func getProjectConstraint(arg string, sm gps.SourceManager) (gps.ProjectConstraint, error) {
-	emptyPC := gps.ProjectConstraint{
+func getProjectConstraint(arg string, sm *gps.SourceMgr) (gps.ProjectConstraint, error) {
+	constraint := gps.ProjectConstraint{
 		Constraint: gps.Any(), // default to any; avoids panics later
 	}
 
 	// try to split on '@'
-	// When there is no `@`, use any version
-	versionStr := "*"
+	var versionStr string
 	atIndex := strings.Index(arg, "@")
 	if atIndex > 0 {
 		parts := strings.SplitN(arg, "@", 2)
 		arg = parts[0]
 		versionStr = parts[1]
+		constraint.Constraint = deduceConstraint(parts[1])
 	}
-
+	// TODO: What if there is no @, assume default branch (which may not be master) ?
 	// TODO: if we decide to keep equals.....
 
 	// split on colon if there is a network location
-	var source string
 	colonIndex := strings.Index(arg, ":")
 	if colonIndex > 0 {
 		parts := strings.SplitN(arg, ":", 2)
 		arg = parts[0]
-		source = parts[1]
+		constraint.Ident.Source = parts[1]
 	}
 
 	pr, err := sm.DeduceProjectRoot(arg)
 	if err != nil {
-		return emptyPC, errors.Wrapf(err, "could not infer project root from dependency path: %s", arg) // this should go through to the user
+		return constraint, errors.Wrapf(err, "could not infer project root from dependency path: %s", arg) // this should go through to the user
 	}
 
 	if string(pr) != arg {
-		return emptyPC, errors.Errorf("dependency path %s is not a project root, try %s instead", arg, pr)
+		return constraint, errors.Errorf("dependency path %s is not a project root, try %s instead", arg, pr)
 	}
 
-	pi := gps.ProjectIdentifier{ProjectRoot: pr, Source: source}
-	c, err := deduceConstraint(versionStr, pi, sm)
-	if err != nil {
-		return emptyPC, err
-	}
-	return gps.ProjectConstraint{Ident: pi, Constraint: c}, nil
-}
+	constraint.Ident.ProjectRoot = gps.ProjectRoot(arg)
 
-// deduceConstraint tries to puzzle out what kind of version is given in a string -
-// semver, a revision, or as a fallback, a plain tag
-func deduceConstraint(s string, pi gps.ProjectIdentifier, sm gps.SourceManager) (gps.Constraint, error) {
-	if s == "" {
-		// Find the default branch
-		versions, err := sm.ListVersions(pi)
-		if err != nil {
-			return nil, errors.Wrapf(err, "list versions for %s(%s)", pi.ProjectRoot, pi.Source) // means repo does not exist
-		}
+	// Below we are checking if the constraint we deduced was valid.
+	if v, ok := constraint.Constraint.(gps.Version); ok && versionStr != "" {
+		if v.Type() == gps.IsVersion {
+			// we hit the fall through case in deduce constraint, let's call out to network
+			// and get the package's versions
+			versions, err := sm.ListVersions(constraint.Ident)
+			if err != nil {
+				return constraint, errors.Wrapf(err, "list versions for %s", arg) // means repo does not exist
+			}
 
-		gps.SortPairedForUpgrade(versions)
-		for _, v := range versions {
-			if v.Type() == gps.IsBranch {
-				return v.Unpair(), nil
+			var found bool
+			for _, version := range versions {
+				if versionStr == version.String() {
+					found = true
+					constraint.Constraint = version.Unpair()
+					break
+				}
+			}
+
+			if !found {
+				return constraint, errors.Errorf("%s is not a valid version for the package %s", versionStr, arg)
 			}
 		}
 	}
 
+	return constraint, nil
+}
+
+// deduceConstraint tries to puzzle out what kind of version is given in a string -
+// semver, a revision, or as a fallback, a plain tag
+func deduceConstraint(s string) gps.Constraint {
 	// always semver if we can
-	c, err := gps.NewSemverConstraintIC(s)
+	c, err := gps.NewSemverConstraint(s)
 	if err == nil {
-		return c, nil
+		return c
 	}
 
 	slen := len(s)
@@ -334,7 +339,7 @@ func deduceConstraint(s string, pi gps.ProjectIdentifier, sm gps.SourceManager) 
 			// Whether or not it's intended to be a SHA1 digest, this is a
 			// valid byte sequence for that, so go with Revision. This
 			// covers git and hg
-			return gps.Revision(s), nil
+			return gps.Revision(s)
 		}
 	}
 	// Next, try for bzr, which has a three-component GUID separated by
@@ -345,54 +350,18 @@ func deduceConstraint(s string, pi gps.ProjectIdentifier, sm gps.SourceManager) 
 		i3 := strings.LastIndex(s, "-")
 		// Skip if - is last char, otherwise this would panic on bounds err
 		if slen == i3+1 {
-			return gps.NewVersion(s), nil
+			return gps.NewVersion(s)
 		}
 
 		i2 := strings.LastIndex(s[:i3], "-")
 		if _, err = strconv.ParseUint(s[i2+1:i3], 10, 64); err == nil {
 			// Getting this far means it'd pretty much be nuts if it's not a
 			// bzr rev, so don't bother parsing the email.
-			return gps.Revision(s), nil
+			return gps.Revision(s)
 		}
 	}
 
-	// call out to network and get the package's versions
-	versions, err := sm.ListVersions(pi)
-	if err != nil {
-		return nil, errors.Wrapf(err, "list versions for %s(%s)", pi.ProjectRoot, pi.Source) // means repo does not exist
-	}
-
-	for _, version := range versions {
-		if s == version.String() {
-			return version.Unpair(), nil
-		}
-	}
-	return nil, errors.Errorf("%s is not a valid version for the package %s(%s)", s, pi.ProjectRoot, pi.Source)
-}
-
-func checkErrors(m map[string]pkgtree.PackageOrErr) error {
-	noGoErrors, pkgErrors := 0, 0
-	for _, poe := range m {
-		if poe.Err != nil {
-			switch poe.Err.(type) {
-			case *build.NoGoError:
-				noGoErrors++
-			default:
-				pkgErrors++
-			}
-		}
-	}
-	if len(m) == 0 || len(m) == noGoErrors {
-		return errors.New("all dirs lacked any go code")
-	}
-
-	if len(m) == pkgErrors {
-		return errors.New("all dirs had go code with errors")
-	}
-
-	if len(m) == pkgErrors+noGoErrors {
-		return errors.Errorf("%d dirs had errors and %d had no go code", pkgErrors, noGoErrors)
-	}
-
-	return nil
+	// If not a plain SHA1 or bzr custom GUID, assume a plain version.
+	// TODO: if there is amgibuity here, then prompt the user?
+	return gps.NewVersion(s)
 }

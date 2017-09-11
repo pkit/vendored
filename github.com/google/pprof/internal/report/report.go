@@ -64,6 +64,7 @@ type Options struct {
 	Ratio               float64
 	Title               string
 	ProfileLabels       []string
+	ActiveFilters       []string
 
 	NodeCount    int
 	NodeFraction float64
@@ -682,16 +683,23 @@ func printComments(w io.Writer, rpt *Report) error {
 	return nil
 }
 
-// printText prints a flat text report for a profile.
-func printText(w io.Writer, rpt *Report) error {
+// TextItem holds a single text report entry.
+type TextItem struct {
+	Name              string
+	InlineLabel       string // Not empty if inlined
+	Flat, FlatPercent string
+	SumPercent        string
+	Cum, CumPercent   string
+}
+
+// TextItems returns a list of text items from the report and a list
+// of labels that describe the report.
+func TextItems(rpt *Report) ([]TextItem, []string) {
 	g, origCount, droppedNodes, _ := rpt.newTrimmedGraph()
 	rpt.selectOutputUnit(g)
+	labels := reportLabels(rpt, g, origCount, droppedNodes, 0, false)
 
-	fmt.Fprintln(w, strings.Join(reportLabels(rpt, g, origCount, droppedNodes, 0, false), "\n"))
-
-	fmt.Fprintf(w, "%10s %5s%% %5s%% %10s %5s%%\n",
-		"flat", "flat", "sum", "cum", "cum")
-
+	var items []TextItem
 	var flatSum int64
 	for _, n := range g.Nodes {
 		name, flat, cum := n.Info.PrintableName(), n.FlatValue(), n.CumValue()
@@ -705,22 +713,45 @@ func printText(w io.Writer, rpt *Report) error {
 			}
 		}
 
+		var inl string
 		if inline {
 			if noinline {
-				name = name + " (partial-inline)"
+				inl = "(partial-inline)"
 			} else {
-				name = name + " (inline)"
+				inl = "(inline)"
 			}
 		}
 
 		flatSum += flat
-		fmt.Fprintf(w, "%10s %s %s %10s %s  %s\n",
-			rpt.formatValue(flat),
-			percentage(flat, rpt.total),
-			percentage(flatSum, rpt.total),
-			rpt.formatValue(cum),
-			percentage(cum, rpt.total),
-			name)
+		items = append(items, TextItem{
+			Name:        name,
+			InlineLabel: inl,
+			Flat:        rpt.formatValue(flat),
+			FlatPercent: percentage(flat, rpt.total),
+			SumPercent:  percentage(flatSum, rpt.total),
+			Cum:         rpt.formatValue(cum),
+			CumPercent:  percentage(cum, rpt.total),
+		})
+	}
+	return items, labels
+}
+
+// printText prints a flat text report for a profile.
+func printText(w io.Writer, rpt *Report) error {
+	items, labels := TextItems(rpt)
+	fmt.Fprintln(w, strings.Join(labels, "\n"))
+	fmt.Fprintf(w, "%10s %5s%% %5s%% %10s %5s%%\n",
+		"flat", "flat", "sum", "cum", "cum")
+	for _, item := range items {
+		inl := item.InlineLabel
+		if inl != "" {
+			inl = " " + inl
+		}
+		fmt.Fprintf(w, "%10s %s %s %10s %s  %s%s\n",
+			item.Flat, item.FlatPercent,
+			item.SumPercent,
+			item.Cum, item.CumPercent,
+			item.Name, inl)
 	}
 	return nil
 }
@@ -754,6 +785,15 @@ func printTraces(w io.Writer, rpt *Report) error {
 		}
 		sort.Strings(labels)
 		fmt.Fprint(w, strings.Join(labels, ""))
+
+		// Print any numeric labels for the sample
+		var numLabels []string
+		for k, v := range sample.NumLabel {
+			numLabels = append(numLabels, fmt.Sprintf("%10s:  %s\n", k, strings.Trim(fmt.Sprintf("%d", v), "[]")))
+		}
+		sort.Strings(numLabels)
+		fmt.Fprint(w, strings.Join(numLabels, ""))
+
 		var d, v int64
 		v = o.SampleValue(sample.Value)
 		if o.SampleMeanDivisor != nil {
@@ -974,24 +1014,25 @@ func printTree(w io.Writer, rpt *Report) error {
 	return nil
 }
 
-// printDOT prints an annotated callgraph in DOT format.
-func printDOT(w io.Writer, rpt *Report) error {
+// GetDOT returns a graph suitable for dot processing along with some
+// configuration information.
+func GetDOT(rpt *Report) (*graph.Graph, *graph.DotConfig) {
 	g, origCount, droppedNodes, droppedEdges := rpt.newTrimmedGraph()
 	rpt.selectOutputUnit(g)
 	labels := reportLabels(rpt, g, origCount, droppedNodes, droppedEdges, true)
-
-	o := rpt.options
-	formatTag := func(v int64, key string) string {
-		return measurement.ScaledLabel(v, key, o.OutputUnit)
-	}
 
 	c := &graph.DotConfig{
 		Title:       rpt.options.Title,
 		Labels:      labels,
 		FormatValue: rpt.formatValue,
-		FormatTag:   formatTag,
 		Total:       rpt.total,
 	}
+	return g, c
+}
+
+// printDOT prints an annotated callgraph in DOT format.
+func printDOT(w io.Writer, rpt *Report) error {
+	g, c := GetDOT(rpt)
 	graph.ComposeDot(w, g, &graph.DotAttributes{}, c)
 	return nil
 }
@@ -1070,6 +1111,11 @@ func reportLabels(rpt *Report, g *graph.Graph, origCount, droppedNodes, droppedE
 		flatSum = flatSum + n.FlatValue()
 	}
 
+	if len(rpt.options.ActiveFilters) > 0 {
+		activeFilters := legendActiveFilters(rpt.options.ActiveFilters)
+		label = append(label, activeFilters...)
+	}
+
 	label = append(label, fmt.Sprintf("Showing nodes accounting for %s, %s of %s total", rpt.formatValue(flatSum), strings.TrimSpace(percentage(flatSum, rpt.total)), rpt.formatValue(rpt.total)))
 
 	if rpt.total != 0 {
@@ -1087,6 +1133,18 @@ func reportLabels(rpt *Report, g *graph.Graph, origCount, droppedNodes, droppedE
 		}
 	}
 	return label
+}
+
+func legendActiveFilters(activeFilters []string) []string {
+	legendActiveFilters := make([]string, len(activeFilters)+1)
+	legendActiveFilters[0] = "Active filters:"
+	for i, s := range activeFilters {
+		if len(s) > 80 {
+			s = s[:80] + "…"
+		}
+		legendActiveFilters[i+1] = "   " + s
+	}
+	return legendActiveFilters
 }
 
 func genLabel(d int, n, l, f string) string {

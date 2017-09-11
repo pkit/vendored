@@ -1,22 +1,23 @@
-hash: 5a5e74f8be7a721d3ea9c2e36d994d2754f15087f89ba8342c4ec9ed4cbedf7b
-updated: 2017-03-01T16:08:43.5505724-08:00
+hash: f52476dff67b66fe9fffe35b63ac0c06962fcaacd326b66820a33edf53b01a16
+updated: 2017-09-01T13:52:16.3705168-07:00
 imports:
 - name: github.com/Azure/go-autorest
-  version: ec5f4903f77ed9927ac95b19ab8e44ada64c1356
+  version: 48a8154950f853ae1f2a9c409e0eb1fb71119bc8
   subpackages:
   - autorest
+  - autorest/adal
   - autorest/azure
   - autorest/date
   - autorest/to
   - autorest/validation
 - name: github.com/dgrijalva/jwt-go
-  version: 2268707a8f0843315e2004ee4f1d021dc08baedf
+  version: a539ee1a749a2b895533f979515ac7e6e0f5b650
 - name: github.com/howeyc/gopass
   version: bf9dde6d0d2c004a008c27aaee91170c786f6db8
 - name: github.com/mattn/go-colorable
-  version: d898aa9fb31c91f35dd28ca75db377eff023c076
+  version: 040dd0b833b34b4182673409ada4df2853b26537
 - name: github.com/mattn/go-isatty
-  version: dda3de49cbfcec471bd7a70e6cc01fcc3ff90109
+  version: fc9e8d8ef48496124e79ae0df75490096eccf6fe
 - name: github.com/mgutz/ansi
   version: 9520e82c474b0a04dd04f8a40959027271bab992
 - name: github.com/mgutz/minimist
@@ -29,18 +30,20 @@ imports:
   version: 4748e29d5718c2df4028a6543edf86fd8cc0f881
 - name: github.com/nozzle/throttler
   version: d9b45f19996c645d38c9266d1f5cf1990e930119
+- name: github.com/satori/go.uuid
+  version: 879c5887cd475cd7864858769793b2ceb0d44feb
 - name: github.com/satori/uuid
-  version: b061729afc07e77a8aa4fad0a2fd840958f1942a
+  version: 5bf94b69c6b68ee1b541973bb8e1144db23a194b
 - name: github.com/shopspring/decimal
-  version: 3526cd0bdb7f64e1178943b7dee81a0cc3d86a69
+  version: 3c692774ac4c47c7a296ec96e553719dba1a68fc
 - name: golang.org/x/crypto
-  version: 453249f01cfeb54c3d549ddb75ff152ca243f9d8
+  version: 558b6879de74bc843225cde5686419267ff707ca
   subpackages:
   - pkcs12
   - pkcs12/internal/rc2
   - ssh/terminal
 - name: golang.org/x/sys
-  version: 76cc09b634294339fa19ec41b5f2a0b3932cea8b
+  version: 0f826bdd13b500be0f1d4004938ad978fcc6031e
   subpackages:
   - unix
 - name: gopkg.in/check.v1
@@ -52,4 +55,11 @@ imports:
   - util
   - watcher
   - watcher/fswatch
-testImports: []
+testImports:
+- name: github.com/dnaeon/go-vcr
+  version: 87d4990451a858cc210399285be976e63bc3c364
+  subpackages:
+  - cassette
+  - recorder
+- name: gopkg.in/yaml.v2
+  version: 25c4ec802a7d637f88d584ab26798e94ad14c13b

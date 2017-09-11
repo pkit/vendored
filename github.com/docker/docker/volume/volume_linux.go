@@ -11,23 +11,22 @@ import (
 
 // ConvertTmpfsOptions converts *mounttypes.TmpfsOptions to the raw option string
 // for mount(2).
-// The logic is copy-pasted from daemon/cluster/executer/container.getMountMask.
-// It will be deduplicated when we migrated the cluster to the new mount scheme.
-func ConvertTmpfsOptions(opt *mounttypes.TmpfsOptions) (string, error) {
-	if opt == nil {
-		return "", nil
-	}
+func ConvertTmpfsOptions(opt *mounttypes.TmpfsOptions, readOnly bool) (string, error) {
 	var rawOpts []string
-	if opt.Mode != 0 {
+	if readOnly {
+		rawOpts = append(rawOpts, "ro")
+	}
+
+	if opt != nil && opt.Mode != 0 {
 		rawOpts = append(rawOpts, fmt.Sprintf("mode=%o", opt.Mode))
 	}
 
-	if opt.SizeBytes != 0 {
+	if opt != nil && opt.SizeBytes != 0 {
 		// calculate suffix here, making this linux specific, but that is
 		// okay, since API is that way anyways.
 
 		// we do this by finding the suffix that divides evenly into the
-		// value, returing the value itself, with no suffix, if it fails.
+		// value, returning the value itself, with no suffix, if it fails.
 		//
 		// For the most part, we don't enforce any semantic to this values.
 		// The operating system will usually align this and enforce minimum

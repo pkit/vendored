@@ -17,6 +17,7 @@ import (
 	timetypes "github.com/docker/docker/api/types/time"
 	"github.com/docker/docker/api/types/versions"
 	"github.com/docker/docker/pkg/ioutils"
+	pkgerrors "github.com/pkg/errors"
 	"golang.org/x/net/context"
 )
 
@@ -35,8 +36,8 @@ func (s *systemRouter) getInfo(ctx context.Context, w http.ResponseWriter, r *ht
 	if err != nil {
 		return err
 	}
-	if s.clusterProvider != nil {
-		info.Swarm = s.clusterProvider.Info()
+	if s.cluster != nil {
+		info.Swarm = s.cluster.Info()
 	}
 
 	if versions.LessThan(httputils.VersionFromContext(ctx), "1.25") {
@@ -45,7 +46,20 @@ func (s *systemRouter) getInfo(ctx context.Context, w http.ResponseWriter, r *ht
 			*types.Info
 			ExecutionDriver string
 		}
-		return httputils.WriteJSON(w, http.StatusOK, &oldInfo{Info: info, ExecutionDriver: "<not supported>"})
+		old := &oldInfo{
+			Info:            info,
+			ExecutionDriver: "<not supported>",
+		}
+		nameOnlySecurityOptions := []string{}
+		kvSecOpts, err := types.DecodeSecurityOptions(old.SecurityOptions)
+		if err != nil {
+			return err
+		}
+		for _, s := range kvSecOpts {
+			nameOnlySecurityOptions = append(nameOnlySecurityOptions, s.Name)
+		}
+		old.SecurityOptions = nameOnlySecurityOptions
+		return httputils.WriteJSON(w, http.StatusOK, old)
 	}
 	return httputils.WriteJSON(w, http.StatusOK, info)
 }
@@ -58,10 +72,15 @@ func (s *systemRouter) getVersion(ctx context.Context, w http.ResponseWriter, r 
 }
 
 func (s *systemRouter) getDiskUsage(ctx context.Context, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
-	du, err := s.backend.SystemDiskUsage()
+	du, err := s.backend.SystemDiskUsage(ctx)
 	if err != nil {
 		return err
 	}
+	builderSize, err := s.builder.DiskUsage()
+	if err != nil {
+		return pkgerrors.Wrap(err, "error getting build cache usage")
+	}
+	du.BuilderSize = builderSize
 
 	return httputils.WriteJSON(w, http.StatusOK, du)
 }

@@ -36,15 +36,14 @@ func (v VersionMiddleware) WrapHandler(handler func(ctx context.Context, w http.
 			apiVersion = v.defaultVersion
 		}
 
-		if versions.GreaterThan(apiVersion, v.defaultVersion) {
-			return errors.NewBadRequestError(fmt.Errorf("client is newer than server (client API version: %s, server API version: %s)", apiVersion, v.defaultVersion))
-		}
 		if versions.LessThan(apiVersion, v.minVersion) {
 			return errors.NewBadRequestError(fmt.Errorf("client version %s is too old. Minimum supported API version is %s, please upgrade your client to a newer version", apiVersion, v.minVersion))
 		}
 
 		header := fmt.Sprintf("Docker/%s (%s)", v.serverVersion, runtime.GOOS)
 		w.Header().Set("Server", header)
+		w.Header().Set("API-Version", v.defaultVersion)
+		w.Header().Set("OSType", runtime.GOOS)
 		ctx = context.WithValue(ctx, "api-version", apiVersion)
 		return handler(ctx, w, r, vars)
 	}

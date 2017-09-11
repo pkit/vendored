@@ -35,11 +35,8 @@ type solution struct {
 	// The hash digest of the input opts
 	hd []byte
 
-	// The analyzer name
-	analyzerName string
-
-	// The analyzer version
-	analyzerVersion int
+	// The analyzer info
+	analyzerInfo ProjectAnalyzerInfo
 
 	// The solver used in producing this solution
 	solv Solver
@@ -76,7 +73,6 @@ func WriteDepTree(basedir string, l Lock, sm SourceManager, sv bool) error {
 		if sv {
 			filepath.Walk(to, stripVendor)
 		}
-		// TODO(sdboyer) dump version metadata file
 	}
 
 	return nil
@@ -95,11 +91,11 @@ func (r solution) InputHash() []byte {
 }
 
 func (r solution) AnalyzerName() string {
-	return r.analyzerName
+	return r.analyzerInfo.Name
 }
 
 func (r solution) AnalyzerVersion() int {
-	return r.analyzerVersion
+	return r.analyzerInfo.Version
 }
 
 func (r solution) SolverName() string {

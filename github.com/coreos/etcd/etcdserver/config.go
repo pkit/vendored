@@ -15,13 +15,12 @@
 package etcdserver
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
-
-	"golang.org/x/net/context"
 
 	"github.com/coreos/etcd/pkg/netutil"
 	"github.com/coreos/etcd/pkg/transport"
@@ -66,6 +65,8 @@ type ServerConfig struct {
 	ClientCertAuthEnabled bool
 
 	AuthToken string
+
+	CorruptCheckTime time.Duration
 }
 
 // VerifyBootstrap sanity-checks the initial config for bootstrap case

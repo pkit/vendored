@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -13,9 +14,11 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/backend"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/versions"
 	"github.com/docker/docker/pkg/ioutils"
 	"github.com/docker/docker/pkg/streamformatter"
+	"github.com/docker/docker/pkg/system"
 	"github.com/docker/docker/registry"
 	"golang.org/x/net/context"
 )
@@ -84,6 +87,41 @@ func (s *imageRouter) postImagesCreate(ctx context.Context, w http.ResponseWrite
 	)
 	defer output.Close()
 
+	// TODO @jhowardmsft LCOW Support: Eventually we will need an API change
+	// so that platform comes from (for example) r.Form.Get("platform"). For
+	// the initial implementation, we assume that the platform is the
+	// runtime OS of the host. It will also need a validation function such
+	// as below which should be called after getting it from the API.
+	//
+	// Ensures the requested platform is valid and normalized
+	//func validatePlatform(req string) (string, error) {
+	//	req = strings.ToLower(req)
+	//	if req == "" {
+	//		req = runtime.GOOS // default to host platform
+	//	}
+	//	valid := []string{runtime.GOOS}
+	//
+	//	if system.LCOWSupported() {
+	//		valid = append(valid, "linux")
+	//	}
+	//
+	//	for _, item := range valid {
+	//		if req == item {
+	//			return req, nil
+	//		}
+	//	}
+	//	return "", fmt.Errorf("invalid platform requested: %s", req)
+	//}
+	//
+	// And in the call-site:
+	//	if platform, err = validatePlatform(platform); err != nil {
+	//		return err
+	//	}
+	platform := runtime.GOOS
+	if system.LCOWSupported() {
+		platform = "linux"
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 
 	if image != "" { //pull
@@ -105,20 +143,19 @@ func (s *imageRouter) postImagesCreate(ctx context.Context, w http.ResponseWrite
 			}
 		}
 
-		err = s.backend.PullImage(ctx, image, tag, metaHeaders, authConfig, output)
+		err = s.backend.PullImage(ctx, image, tag, platform, metaHeaders, authConfig, output)
 	} else { //import
 		src := r.Form.Get("fromSrc")
 		// 'err' MUST NOT be defined within this block, we need any error
 		// generated from the download to be available to the output
 		// stream processing below
-		err = s.backend.ImportImage(src, repo, tag, message, r.Body, output, r.Form["changes"])
+		err = s.backend.ImportImage(src, repo, platform, tag, message, r.Body, output, r.Form["changes"])
 	}
 	if err != nil {
 		if !output.Flushed() {
 			return err
 		}
-		sf := streamformatter.NewJSONStreamFormatter()
-		output.Write(sf.FormatError(err))
+		output.Write(streamformatter.FormatError(err))
 	}
 
 	return nil
@@ -163,8 +200,7 @@ func (s *imageRouter) postImagesPush(ctx context.Context, w http.ResponseWriter,
 		if !output.Flushed() {
 			return err
 		}
-		sf := streamformatter.NewJSONStreamFormatter()
-		output.Write(sf.FormatError(err))
+		output.Write(streamformatter.FormatError(err))
 	}
 	return nil
 }
@@ -189,8 +225,7 @@ func (s *imageRouter) getImagesGet(ctx context.Context, w http.ResponseWriter, r
 		if !output.Flushed() {
 			return err
 		}
-		sf := streamformatter.NewJSONStreamFormatter()
-		output.Write(sf.FormatError(err))
+		output.Write(streamformatter.FormatError(err))
 	}
 	return nil
 }
@@ -206,7 +241,7 @@ func (s *imageRouter) postImagesLoad(ctx context.Context, w http.ResponseWriter,
 	output := ioutils.NewWriteFlusher(w)
 	defer output.Close()
 	if err := s.backend.LoadImage(r.Body, output, quiet); err != nil {
-		output.Write(streamformatter.NewJSONStreamFormatter().FormatError(err))
+		output.Write(streamformatter.FormatError(err))
 	}
 	return nil
 }
@@ -247,8 +282,18 @@ func (s *imageRouter) getImagesJSON(ctx context.Context, w http.ResponseWriter, 
 		return err
 	}
 
-	// FIXME: The filter parameter could just be a match filter
-	images, err := s.backend.Images(r.Form.Get("filters"), r.Form.Get("filter"), httputils.BoolValue(r, "all"), false)
+	imageFilters, err := filters.FromParam(r.Form.Get("filters"))
+	if err != nil {
+		return err
+	}
+
+	filterParam := r.Form.Get("filter")
+	// FIXME(vdemeester) This has been deprecated in 1.13, and is target for removal for v17.12
+	if filterParam != "" {
+		imageFilters.Add("reference", filterParam)
+	}
+
+	images, err := s.backend.Images(imageFilters, httputils.BoolValue(r, "all"), false)
 	if err != nil {
 		return err
 	}
@@ -320,16 +365,12 @@ func (s *imageRouter) postImagesPrune(ctx context.Context, w http.ResponseWriter
 		return err
 	}
 
-	if err := httputils.CheckForJSON(r); err != nil {
+	pruneFilters, err := filters.FromParam(r.Form.Get("filters"))
+	if err != nil {
 		return err
 	}
 
-	var cfg types.ImagesPruneConfig
-	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
-		return err
-	}
-
-	pruneReport, err := s.backend.ImagesPrune(&cfg)
+	pruneReport, err := s.backend.ImagesPrune(ctx, pruneFilters)
 	if err != nil {
 		return err
 	}

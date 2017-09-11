@@ -24,14 +24,16 @@ import (
 )
 
 type source struct {
-	Sources  []string
-	ExecName string
-	BuildID  string
-	Base     []string
+	Sources   []string
+	ExecName  string
+	BuildID   string
+	Base      []string
+	Normalize bool
 
-	Seconds   int
-	Timeout   int
-	Symbolize string
+	Seconds      int
+	Timeout      int
+	Symbolize    string
+	HTTPHostport string
 }
 
 // Parse parses the command lines through the specified flags package
@@ -58,6 +60,7 @@ func parseFlags(o *plugin.Options) (*source, []string, error) {
 	flagTools := flag.String("tools", os.Getenv("PPROF_TOOLS"), "Path for object tool pathnames")
 
 	flagTimeout := flag.Int("timeout", -1, "Timeout in seconds for fetching a profile")
+	flagHTTP := flag.String("http", "", "Present interactive web based UI at the specified http host:port")
 
 	// Flags used during command processing
 	installedFlags := installFlags(flag)
@@ -106,6 +109,9 @@ func parseFlags(o *plugin.Options) (*source, []string, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	if cmd != nil && *flagHTTP != "" {
+		return nil, nil, fmt.Errorf("-http is not compatible with an output format on the command line")
+	}
 
 	si := pprofVariables["sample_index"].value
 	si = sampleIndex(flagTotalDelay, si, "delay", "-total_delay", o.UI)
@@ -122,12 +128,13 @@ func parseFlags(o *plugin.Options) (*source, []string, error) {
 	}
 
 	source := &source{
-		Sources:   args,
-		ExecName:  execName,
-		BuildID:   *flagBuildID,
-		Seconds:   *flagSeconds,
-		Timeout:   *flagTimeout,
-		Symbolize: *flagSymbolize,
+		Sources:      args,
+		ExecName:     execName,
+		BuildID:      *flagBuildID,
+		Seconds:      *flagSeconds,
+		Timeout:      *flagTimeout,
+		Symbolize:    *flagSymbolize,
+		HTTPHostport: *flagHTTP,
 	}
 
 	for _, s := range *flagBase {
@@ -135,6 +142,12 @@ func parseFlags(o *plugin.Options) (*source, []string, error) {
 			source.Base = append(source.Base, *s)
 		}
 	}
+
+	normalize := pprofVariables["normalize"].boolValue()
+	if normalize && len(source.Base) == 0 {
+		return nil, nil, fmt.Errorf("Must have base profile to normalize by")
+	}
+	source.Normalize = normalize
 
 	if bu, ok := o.Obj.(*binutils.Binutils); ok {
 		bu.SetTools(*flagTools)
@@ -240,7 +253,25 @@ func outputFormat(bcmd map[string]*bool, acmd map[string]*string) (cmd []string,
 	return cmd, nil
 }
 
-var usageMsgHdr = "usage: pprof [options] [-base source] [binary] <source> ...\n"
+var usageMsgHdr = `usage:
+
+Produce output in the specified format.
+
+   pprof <format> [options] [binary] <source> ...
+
+Omit the format to get an interactive shell whose commands can be used
+to generate various views of a profile
+
+   pprof [options] [binary] <source> ...
+
+Omit the format and provide the "-http" flag to get an interactive web
+interface at the specified host:port that can be used to navigate through
+various views of a profile.
+
+   pprof -http [host]:[port] [options] [binary] <source> ...
+
+Details:
+`
 
 var usageMsgSrc = "\n\n" +
 	"  Source options:\n" +
@@ -261,7 +292,19 @@ var usageMsgSrc = "\n\n" +
 
 var usageMsgVars = "\n\n" +
 	"  Misc options:\n" +
-	"   -tools                 Search path for object tools\n" +
+	"   -http              Provide web based interface at host:port.\n" +
+	"                      Host is optional and 'localhost' by default.\n" +
+	"                      Port is optional and a randomly available port by default.\n" +
+	"   -tools             Search path for object tools\n" +
+	"\n" +
+	"  Legacy convenience options:\n" +
+	"   -inuse_space           Same as -sample_index=inuse_space\n" +
+	"   -inuse_objects         Same as -sample_index=inuse_objects\n" +
+	"   -alloc_space           Same as -sample_index=alloc_space\n" +
+	"   -alloc_objects         Same as -sample_index=alloc_objects\n" +
+	"   -total_delay           Same as -sample_index=delay\n" +
+	"   -contentions           Same as -sample_index=contentions\n" +
+	"   -mean_delay            Same as -mean -sample_index=delay\n" +
 	"\n" +
 	"  Environment Variables:\n" +
 	"   PPROF_TMPDIR       Location for saved profiles (default $HOME/pprof)\n" +

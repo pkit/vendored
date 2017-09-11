@@ -43,8 +43,10 @@ import (
 //go:cgo_import_dynamic libc_fchown fchown "libc.so"
 //go:cgo_import_dynamic libc_fchownat fchownat "libc.so"
 //go:cgo_import_dynamic libc_fdatasync fdatasync "libc.so"
+//go:cgo_import_dynamic libc_flock flock "libc.so"
 //go:cgo_import_dynamic libc_fpathconf fpathconf "libc.so"
 //go:cgo_import_dynamic libc_fstat fstat "libc.so"
+//go:cgo_import_dynamic libc_fstatvfs fstatvfs "libc.so"
 //go:cgo_import_dynamic libc_getdents getdents "libc.so"
 //go:cgo_import_dynamic libc_getgid getgid "libc.so"
 //go:cgo_import_dynamic libc_getpid getpid "libc.so"
@@ -101,6 +103,7 @@ import (
 //go:cgo_import_dynamic libc_setuid setuid "libc.so"
 //go:cgo_import_dynamic libc_shutdown shutdown "libsocket.so"
 //go:cgo_import_dynamic libc_stat stat "libc.so"
+//go:cgo_import_dynamic libc_statvfs statvfs "libc.so"
 //go:cgo_import_dynamic libc_symlink symlink "libc.so"
 //go:cgo_import_dynamic libc_sync sync "libc.so"
 //go:cgo_import_dynamic libc_times times "libc.so"
@@ -126,7 +129,6 @@ import (
 //go:cgo_import_dynamic libc_getpeername getpeername "libsocket.so"
 //go:cgo_import_dynamic libc_setsockopt setsockopt "libsocket.so"
 //go:cgo_import_dynamic libc_recvfrom recvfrom "libsocket.so"
-//go:cgo_import_dynamic libc_sysconf sysconf "libc.so"
 
 //go:linkname procpipe libc_pipe
 //go:linkname procgetsockname libc_getsockname
@@ -161,8 +163,10 @@ import (
 //go:linkname procFchown libc_fchown
 //go:linkname procFchownat libc_fchownat
 //go:linkname procFdatasync libc_fdatasync
+//go:linkname procFlock libc_flock
 //go:linkname procFpathconf libc_fpathconf
 //go:linkname procFstat libc_fstat
+//go:linkname procFstatvfs libc_fstatvfs
 //go:linkname procGetdents libc_getdents
 //go:linkname procGetgid libc_getgid
 //go:linkname procGetpid libc_getpid
@@ -219,6 +223,7 @@ import (
 //go:linkname procSetuid libc_setuid
 //go:linkname procshutdown libc_shutdown
 //go:linkname procStat libc_stat
+//go:linkname procStatvfs libc_statvfs
 //go:linkname procSymlink libc_symlink
 //go:linkname procSync libc_sync
 //go:linkname procTimes libc_times
@@ -244,7 +249,6 @@ import (
 //go:linkname procgetpeername libc_getpeername
 //go:linkname procsetsockopt libc_setsockopt
 //go:linkname procrecvfrom libc_recvfrom
-//go:linkname procsysconf libc_sysconf
 
 var (
 	procpipe,
@@ -280,8 +284,10 @@ var (
 	procFchown,
 	procFchownat,
 	procFdatasync,
+	procFlock,
 	procFpathconf,
 	procFstat,
+	procFstatvfs,
 	procGetdents,
 	procGetgid,
 	procGetpid,
@@ -338,6 +344,7 @@ var (
 	procSetuid,
 	procshutdown,
 	procStat,
+	procStatvfs,
 	procSymlink,
 	procSync,
 	procTimes,
@@ -362,8 +369,7 @@ var (
 	proc__xnet_getsockopt,
 	procgetpeername,
 	procsetsockopt,
-	procrecvfrom,
-	procsysconf syscallFunc
+	procrecvfrom syscallFunc
 )
 
 func pipe(p *[2]_C_int) (n int, err error) {
@@ -513,7 +519,7 @@ func acct(path *byte) (err error) {
 	return
 }
 
-func ioctl(fd int, req int, arg uintptr) (err error) {
+func ioctl(fd int, req uint, arg uintptr) (err error) {
 	_, _, e1 := sysvicall6(uintptr(unsafe.Pointer(&procioctl)), 3, uintptr(fd), uintptr(req), uintptr(arg), 0, 0, 0)
 	if e1 != 0 {
 		err = e1
@@ -696,6 +702,14 @@ func Fdatasync(fd int) (err error) {
 	return
 }
 
+func Flock(fd int, how int) (err error) {
+	_, _, e1 := sysvicall6(uintptr(unsafe.Pointer(&procFlock)), 2, uintptr(fd), uintptr(how), 0, 0, 0, 0)
+	if e1 != 0 {
+		err = e1
+	}
+	return
+}
+
 func Fpathconf(fd int, name int) (val int, err error) {
 	r0, _, e1 := sysvicall6(uintptr(unsafe.Pointer(&procFpathconf)), 2, uintptr(fd), uintptr(name), 0, 0, 0, 0)
 	val = int(r0)
@@ -707,6 +721,14 @@ func Fpathconf(fd int, name int) (val int, err error) {
 
 func Fstat(fd int, stat *Stat_t) (err error) {
 	_, _, e1 := sysvicall6(uintptr(unsafe.Pointer(&procFstat)), 2, uintptr(fd), uintptr(unsafe.Pointer(stat)), 0, 0, 0, 0)
+	if e1 != 0 {
+		err = e1
+	}
+	return
+}
+
+func Fstatvfs(fd int, vfsstat *Statvfs_t) (err error) {
+	_, _, e1 := sysvicall6(uintptr(unsafe.Pointer(&procFstatvfs)), 2, uintptr(fd), uintptr(unsafe.Pointer(vfsstat)), 0, 0, 0, 0)
 	if e1 != 0 {
 		err = e1
 	}
@@ -1302,6 +1324,19 @@ func Stat(path string, stat *Stat_t) (err error) {
 	return
 }
 
+func Statvfs(path string, vfsstat *Statvfs_t) (err error) {
+	var _p0 *byte
+	_p0, err = BytePtrFromString(path)
+	if err != nil {
+		return
+	}
+	_, _, e1 := sysvicall6(uintptr(unsafe.Pointer(&procStatvfs)), 2, uintptr(unsafe.Pointer(_p0)), uintptr(unsafe.Pointer(vfsstat)), 0, 0, 0, 0)
+	if e1 != 0 {
+		err = e1
+	}
+	return
+}
+
 func Symlink(path string, link string) (err error) {
 	var _p0 *byte
 	_p0, err = BytePtrFromString(path)
@@ -1546,15 +1581,6 @@ func recvfrom(fd int, p []byte, flags int, from *RawSockaddrAny, fromlen *_Sockl
 	}
 	r0, _, e1 := sysvicall6(uintptr(unsafe.Pointer(&procrecvfrom)), 6, uintptr(fd), uintptr(unsafe.Pointer(_p0)), uintptr(len(p)), uintptr(flags), uintptr(unsafe.Pointer(from)), uintptr(unsafe.Pointer(fromlen)))
 	n = int(r0)
-	if e1 != 0 {
-		err = e1
-	}
-	return
-}
-
-func sysconf(name int) (n int64, err error) {
-	r0, _, e1 := sysvicall6(uintptr(unsafe.Pointer(&procsysconf)), 1, uintptr(name), 0, 0, 0, 0, 0)
-	n = int64(r0)
 	if e1 != 0 {
 		err = e1
 	}

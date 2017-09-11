@@ -887,6 +887,23 @@ var bimodalFixtures = map[string]bimodalFixture{
 			"baz 1.0.0",
 		),
 	},
+	"require activates constraints": {
+		ds: []depspec{
+			dsp(mkDepspec("root 0.0.0", "foo 1.0.0", "bar 1.0.0"),
+				pkg("root", "foo")),
+			dsp(mkDepspec("foo 1.0.0"),
+				pkg("foo", "bar")),
+			dsp(mkDepspec("bar 1.0.0"),
+				pkg("bar")),
+			dsp(mkDepspec("bar 1.1.0"),
+				pkg("bar")),
+		},
+		require: []string{"bar"},
+		r: mksolution(
+			"foo 1.0.0",
+			"bar 1.0.0",
+		),
+	},
 	"require subpackage": {
 		ds: []depspec{
 			dsp(mkDepspec("root 0.0.0", "bar 1.0.0"),
@@ -1087,7 +1104,6 @@ func (f bimodalFixture) solution() map[ProjectIdentifier]LockedProject {
 func (f bimodalFixture) rootmanifest() RootManifest {
 	m := simpleRootManifest{
 		c:   pcSliceToMap(f.ds[0].deps),
-		tc:  pcSliceToMap(f.ds[0].devdeps),
 		ovr: f.ovr,
 		ig:  make(map[string]bool),
 		req: make(map[string]bool),

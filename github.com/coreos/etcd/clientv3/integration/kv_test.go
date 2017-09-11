@@ -16,6 +16,7 @@ package integration
 
 import (
 	"bytes"
+	"context"
 	"math/rand"
 	"os"
 	"reflect"
@@ -28,7 +29,7 @@ import (
 	"github.com/coreos/etcd/integration"
 	"github.com/coreos/etcd/mvcc/mvccpb"
 	"github.com/coreos/etcd/pkg/testutil"
-	"golang.org/x/net/context"
+
 	"google.golang.org/grpc"
 )
 
@@ -824,8 +825,8 @@ func TestKVPutStoppedServerAndClose(t *testing.T) {
 	}
 }
 
-// TestKVGetOneEndpointDown ensures a client can connect and get if one endpoint is down
-func TestKVPutOneEndpointDown(t *testing.T) {
+// TestKVGetOneEndpointDown ensures a client can connect and get if one endpoint is down.
+func TestKVGetOneEndpointDown(t *testing.T) {
 	defer testutil.AfterTest(t)
 	clus := integration.NewClusterV3(t, &integration.ClusterConfig{Size: 3})
 	defer clus.Terminate(t)

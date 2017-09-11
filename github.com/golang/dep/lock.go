@@ -95,9 +95,9 @@ func fromRawLock(raw rawLock) (*Lock, error) {
 			if ld.Branch != "" {
 				return nil, errors.Errorf("lock file specified both a branch (%s) and version (%s) for %s", ld.Branch, ld.Version, ld.Name)
 			}
-			v = gps.NewVersion(ld.Version).Is(r)
+			v = gps.NewVersion(ld.Version).Pair(r)
 		} else if ld.Branch != "" {
-			v = gps.NewBranch(ld.Branch).Is(r)
+			v = gps.NewBranch(ld.Branch).Pair(r)
 		} else if r == "" {
 			return nil, errors.Errorf("lock file has entry for %s, but specifies no branch or version", ld.Name)
 		}
@@ -120,6 +120,20 @@ func (l *Lock) InputHash() []byte {
 // Projects returns the list of LockedProjects contained in the lock data.
 func (l *Lock) Projects() []gps.LockedProject {
 	return l.P
+}
+
+// HasProjectWithRoot checks if the lock contains a project with the provided
+// ProjectRoot.
+//
+// This check is O(n) in the number of projects.
+func (l *Lock) HasProjectWithRoot(root gps.ProjectRoot) bool {
+	for _, p := range l.P {
+		if p.Ident().ProjectRoot == root {
+			return true
+		}
+	}
+
+	return false
 }
 
 // toRaw converts the manifest into a representation suitable to write to the lock file

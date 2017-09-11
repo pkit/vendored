@@ -107,9 +107,6 @@ func (bs *baseVCSSource) exportRevisionTo(ctx context.Context, r Revision, to st
 		return unwrapVcsErr(err)
 	}
 
-	// TODO(sdboyer) this is a simplistic approach and relying on the tools
-	// themselves might make it faster, but git's the overwhelming case (and has
-	// its own method) so fine for now
 	return fs.CopyDir(bs.repo.LocalPath(), to)
 }
 
@@ -136,7 +133,7 @@ func (s *gitSource) exportRevisionTo(ctx context.Context, rev Revision, to strin
 	// could have an err here...but it's hard to imagine how?
 	defer fs.RenameWithFallback(bak, idx)
 
-	out, err := runFromRepoDir(ctx, r, "git", "read-tree", rev.String())
+	out, err := runFromRepoDir(ctx, r, defaultCmdTimeout, "git", "read-tree", rev.String())
 	if err != nil {
 		return fmt.Errorf("%s: %s", out, err)
 	}
@@ -152,7 +149,7 @@ func (s *gitSource) exportRevisionTo(ctx context.Context, rev Revision, to strin
 	// though we have a bunch of housekeeping to do to set up, then tear
 	// down, the sparse checkout controls, as well as restore the original
 	// index and HEAD.
-	out, err = runFromRepoDir(ctx, r, "git", "checkout-index", "-a", "--prefix="+to)
+	out, err = runFromRepoDir(ctx, r, defaultCmdTimeout, "git", "checkout-index", "-a", "--prefix="+to)
 	if err != nil {
 		return fmt.Errorf("%s: %s", out, err)
 	}
@@ -229,7 +226,7 @@ func (s *gitSource) listVersions(ctx context.Context) (vlist []PairedVersion, er
 			v = branchVersion{
 				name:      n,
 				isDefault: isdef,
-			}.Is(rev).(PairedVersion)
+			}.Pair(rev).(PairedVersion)
 
 			vlist[uniq] = v
 			uniq++
@@ -247,7 +244,7 @@ func (s *gitSource) listVersions(ctx context.Context) (vlist []PairedVersion, er
 				// version first. Which should be impossible, but this
 				// covers us in case of weirdness, anyway.
 			}
-			v = NewVersion(vstr).Is(Revision(pair[:40])).(PairedVersion)
+			v = NewVersion(vstr).Pair(Revision(pair[:40])).(PairedVersion)
 			smap[vstr] = true
 			vlist[uniq] = v
 			uniq++
@@ -265,7 +262,7 @@ func (s *gitSource) listVersions(ctx context.Context) (vlist []PairedVersion, er
 			if bv, ok := pv.Unpair().(branchVersion); ok {
 				if bv.name != "master" && bv.isDefault {
 					bv.isDefault = false
-					vlist[k] = bv.Is(pv.Underlying())
+					vlist[k] = bv.Pair(pv.Revision())
 				}
 			}
 		}
@@ -341,7 +338,7 @@ func (s *gopkginSource) listVersions(ctx context.Context) ([]PairedVersion, erro
 		vlist[dbranch] = branchVersion{
 			name:      dbv.v.(branchVersion).name,
 			isDefault: true,
-		}.Is(dbv.r)
+		}.Pair(dbv.r)
 	}
 
 	return vlist, nil
@@ -351,6 +348,18 @@ func (s *gopkginSource) listVersions(ctx context.Context) ([]PairedVersion, erro
 // all standard bazaar remotes.
 type bzrSource struct {
 	baseVCSSource
+}
+
+func (s *bzrSource) exportRevisionTo(ctx context.Context, rev Revision, to string) error {
+	if err := s.baseVCSSource.exportRevisionTo(ctx, rev, to); err != nil {
+		return err
+	}
+
+	if err := os.RemoveAll(filepath.Join(to, ".bzr")); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (s *bzrSource) listVersions(ctx context.Context) ([]PairedVersion, error) {
@@ -365,7 +374,7 @@ func (s *bzrSource) listVersions(ctx context.Context) ([]PairedVersion, error) {
 	}
 
 	// Now, list all the tags
-	out, err := runFromRepoDir(ctx, r, "bzr", "tags", "--show-ids", "-v")
+	out, err := runFromRepoDir(ctx, r, defaultCmdTimeout, "bzr", "tags", "--show-ids", "-v")
 	if err != nil {
 		return nil, fmt.Errorf("%s: %s", err, string(out))
 	}
@@ -373,7 +382,7 @@ func (s *bzrSource) listVersions(ctx context.Context) ([]PairedVersion, error) {
 	all := bytes.Split(bytes.TrimSpace(out), []byte("\n"))
 
 	var branchrev []byte
-	branchrev, err = runFromRepoDir(ctx, r, "bzr", "version-info", "--custom", "--template={revision_id}", "--revision=branch:.")
+	branchrev, err = runFromRepoDir(ctx, r, defaultCmdTimeout, "bzr", "version-info", "--custom", "--template={revision_id}", "--revision=branch:.")
 	br := string(branchrev)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %s", err, br)
@@ -386,13 +395,13 @@ func (s *bzrSource) listVersions(ctx context.Context) ([]PairedVersion, error) {
 		idx := bytes.IndexByte(line, 32) // space
 		v := NewVersion(string(line[:idx]))
 		r := Revision(bytes.TrimSpace(line[idx:]))
-		vlist = append(vlist, v.Is(r))
+		vlist = append(vlist, v.Pair(r))
 	}
 
 	// Last, add the default branch, hardcoding the visual representation of it
 	// that bzr uses when operating in the workflow mode we're using.
 	v := newDefaultBranch("(default)")
-	vlist = append(vlist, v.Is(Revision(string(branchrev))))
+	vlist = append(vlist, v.Pair(Revision(string(branchrev))))
 
 	return vlist, nil
 }
@@ -401,6 +410,20 @@ func (s *bzrSource) listVersions(ctx context.Context) ([]PairedVersion, error) {
 // all standard mercurial servers.
 type hgSource struct {
 	baseVCSSource
+}
+
+func (s *hgSource) exportRevisionTo(ctx context.Context, rev Revision, to string) error {
+	// TODO: use hg instead of the generic approach in
+	// baseVCSSource.exportRevisionTo to make it faster.
+	if err := s.baseVCSSource.exportRevisionTo(ctx, rev, to); err != nil {
+		return err
+	}
+
+	if err := os.RemoveAll(filepath.Join(to, ".hg")); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (s *hgSource) listVersions(ctx context.Context) ([]PairedVersion, error) {
@@ -416,7 +439,7 @@ func (s *hgSource) listVersions(ctx context.Context) ([]PairedVersion, error) {
 	}
 
 	// Now, list all the tags
-	out, err := runFromRepoDir(ctx, r, "hg", "tags", "--debug", "--verbose")
+	out, err := runFromRepoDir(ctx, r, defaultCmdTimeout, "hg", "tags", "--debug", "--verbose")
 	if err != nil {
 		return nil, fmt.Errorf("%s: %s", err, string(out))
 	}
@@ -443,14 +466,14 @@ func (s *hgSource) listVersions(ctx context.Context) ([]PairedVersion, error) {
 		}
 
 		idx := bytes.IndexByte(pair[0], 32) // space
-		v := NewVersion(string(pair[0][:idx])).Is(Revision(pair[1])).(PairedVersion)
+		v := NewVersion(string(pair[0][:idx])).Pair(Revision(pair[1])).(PairedVersion)
 		vlist = append(vlist, v)
 	}
 
 	// bookmarks next, because the presence of the magic @ bookmark has to
 	// determine how we handle the branches
 	var magicAt bool
-	out, err = runFromRepoDir(ctx, r, "hg", "bookmarks", "--debug")
+	out, err = runFromRepoDir(ctx, r, defaultCmdTimeout, "hg", "bookmarks", "--debug")
 	if err != nil {
 		// better nothing than partial and misleading
 		return nil, fmt.Errorf("%s: %s", err, string(out))
@@ -475,15 +498,15 @@ func (s *hgSource) listVersions(ctx context.Context) ([]PairedVersion, error) {
 			var v PairedVersion
 			if str == "@" {
 				magicAt = true
-				v = newDefaultBranch(str).Is(Revision(pair[1])).(PairedVersion)
+				v = newDefaultBranch(str).Pair(Revision(pair[1])).(PairedVersion)
 			} else {
-				v = NewBranch(str).Is(Revision(pair[1])).(PairedVersion)
+				v = NewBranch(str).Pair(Revision(pair[1])).(PairedVersion)
 			}
 			vlist = append(vlist, v)
 		}
 	}
 
-	out, err = runFromRepoDir(ctx, r, "hg", "branches", "-c", "--debug")
+	out, err = runFromRepoDir(ctx, r, defaultCmdTimeout, "hg", "branches", "-c", "--debug")
 	if err != nil {
 		// better nothing than partial and misleading
 		return nil, fmt.Errorf("%s: %s", err, string(out))
@@ -504,9 +527,9 @@ func (s *hgSource) listVersions(ctx context.Context) ([]PairedVersion, error) {
 		// "default" branch, then mark it as default branch
 		var v PairedVersion
 		if !magicAt && str == "default" {
-			v = newDefaultBranch(str).Is(Revision(pair[1])).(PairedVersion)
+			v = newDefaultBranch(str).Pair(Revision(pair[1])).(PairedVersion)
 		} else {
-			v = NewBranch(str).Is(Revision(pair[1])).(PairedVersion)
+			v = NewBranch(str).Pair(Revision(pair[1])).(PairedVersion)
 		}
 		vlist = append(vlist, v)
 	}

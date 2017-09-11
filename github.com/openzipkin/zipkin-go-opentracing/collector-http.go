@@ -8,7 +8,7 @@ import (
 
 	"github.com/apache/thrift/lib/go/thrift"
 
-	"github.com/openzipkin/zipkin-go-opentracing/_thrift/gen-go/zipkincore"
+	"github.com/openzipkin/zipkin-go-opentracing/thrift/gen-go/zipkincore"
 )
 
 // Default timeout for http request in seconds
@@ -180,7 +180,7 @@ func (c *HTTPCollector) append(span *zipkincore.Span) (newBatchSize int) {
 	c.batch = append(c.batch, span)
 	if len(c.batch) > c.maxBacklog {
 		dispose := len(c.batch) - c.maxBacklog
-		c.logger.Log("Backlog too long, disposing spans.", "count", dispose)
+		c.logger.Log("msg", "backlog too long, disposing spans.", "count", dispose)
 		c.batch = c.batch[dispose:]
 	}
 	newBatchSize = len(c.batch)

@@ -1,4 +1,4 @@
-// +build linux freebsd
+// +build linux freebsd solaris
 
 package container
 
@@ -8,37 +8,24 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/Sirupsen/logrus"
+	"github.com/docker/docker/api/types"
 	containertypes "github.com/docker/docker/api/types/container"
 	mounttypes "github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/pkg/chrootarchive"
+	"github.com/docker/docker/pkg/mount"
 	"github.com/docker/docker/pkg/stringid"
 	"github.com/docker/docker/pkg/symlink"
 	"github.com/docker/docker/pkg/system"
-	"github.com/docker/docker/utils"
 	"github.com/docker/docker/volume"
-	"github.com/opencontainers/runc/libcontainer/label"
+	"github.com/opencontainers/selinux/go-selinux/label"
+	"golang.org/x/sys/unix"
 )
 
-// DefaultSHMSize is the default size (64MB) of the SHM which will be mounted in the container
-const DefaultSHMSize int64 = 67108864
-
-// Container holds the fields specific to unixen implementations.
-// See CommonContainer for standard fields common to all containers.
-type Container struct {
-	CommonContainer
-
-	// Fields below here are platform specific.
-	AppArmorProfile string
-	HostnamePath    string
-	HostsPath       string
-	ShmPath         string
-	ResolvConfPath  string
-	SeccompProfile  string
-	NoNewPrivileges bool
-}
+const (
+	containerSecretMountPath = "/run/secrets"
+)
 
 // ExitStatus provides exit reasons for a container.
 type ExitStatus struct {
@@ -47,27 +34,6 @@ type ExitStatus struct {
 
 	// Whether the container encountered an OOM.
 	OOMKilled bool
-}
-
-// CreateDaemonEnvironment returns the list of all environment variables given the list of
-// environment variables related to links.
-// Sets PATH, HOSTNAME and if container.Config.Tty is set: TERM.
-// The defaults set here do not override the values in container.Config.Env
-func (container *Container) CreateDaemonEnvironment(tty bool, linkedEnv []string) []string {
-	// Setup environment
-	env := []string{
-		"PATH=" + system.DefaultPathEnv,
-		"HOSTNAME=" + container.Config.Hostname,
-	}
-	if tty {
-		env = append(env, "TERM=xterm")
-	}
-	env = append(env, linkedEnv...)
-	// because the env on the container can override certain default values
-	// we need to replace the 'env' keys where they match and append anything
-	// else.
-	env = utils.ReplaceOrAppendEnvValues(env, container.Config.Env)
-	return env
 }
 
 // TrySetNetworkMount attempts to set the network mounts given a provided destination and
@@ -97,18 +63,6 @@ func (container *Container) BuildHostnameFile() error {
 	}
 	container.HostnamePath = hostnamePath
 	return ioutil.WriteFile(container.HostnamePath, []byte(container.Config.Hostname+"\n"), 0644)
-}
-
-// appendNetworkMounts appends any network mounts to the array of mount points passed in
-func appendNetworkMounts(container *Container, volumeMounts []volume.MountPoint) ([]volume.MountPoint, error) {
-	for _, mnt := range container.NetworkMounts() {
-		dest, err := container.GetResourcePath(mnt.Destination)
-		if err != nil {
-			return nil, err
-		}
-		volumeMounts = append(volumeMounts, volume.MountPoint{Destination: dest})
-	}
-	return volumeMounts, nil
 }
 
 // NetworkMounts returns the list of network mounts.
@@ -200,7 +154,7 @@ func (container *Container) CopyImagePathContent(v volume.Volume, destination st
 			logrus.Warnf("error while unmounting volume %s: %v", v.Name(), err)
 		}
 	}()
-	if err := label.Relabel(path, container.MountLabel, true); err != nil && err != syscall.ENOTSUP {
+	if err := label.Relabel(path, container.MountLabel, true); err != nil && err != unix.ENOTSUP {
 		return err
 	}
 	return copyExistingContents(rootfs, path)
@@ -232,7 +186,9 @@ func (container *Container) UnmountIpcMounts(unmount func(pth string) error) {
 			warnings = append(warnings, err.Error())
 		} else if shmPath != "" {
 			if err := unmount(shmPath); err != nil && !os.IsNotExist(err) {
-				warnings = append(warnings, fmt.Sprintf("failed to umount %s: %v", shmPath, err))
+				if mounted, mErr := mount.Mounted(shmPath); mounted || mErr != nil {
+					warnings = append(warnings, fmt.Sprintf("failed to umount %s: %v", shmPath, err))
+				}
 			}
 
 		}
@@ -260,19 +216,83 @@ func (container *Container) IpcMounts() []Mount {
 	return mounts
 }
 
-// UpdateContainer updates configuration of a container.
-func (container *Container) UpdateContainer(hostConfig *containertypes.HostConfig) error {
-	container.Lock()
-	defer container.Unlock()
+// SecretMounts returns the mounts for the secret path.
+func (container *Container) SecretMounts() []Mount {
+	var mounts []Mount
+	for _, r := range container.SecretReferences {
+		if r.File == nil {
+			continue
+		}
+		mounts = append(mounts, Mount{
+			Source:      container.SecretFilePath(*r),
+			Destination: getSecretTargetPath(r),
+			Writable:    false,
+		})
+	}
 
+	return mounts
+}
+
+// UnmountSecrets unmounts the local tmpfs for secrets
+func (container *Container) UnmountSecrets() error {
+	if _, err := os.Stat(container.SecretMountPath()); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	return detachMounted(container.SecretMountPath())
+}
+
+// ConfigMounts returns the mounts for configs.
+func (container *Container) ConfigMounts() []Mount {
+	var mounts []Mount
+	for _, configRef := range container.ConfigReferences {
+		if configRef.File == nil {
+			continue
+		}
+		mounts = append(mounts, Mount{
+			Source:      container.ConfigFilePath(*configRef),
+			Destination: configRef.File.Name,
+			Writable:    false,
+		})
+	}
+
+	return mounts
+}
+
+// UpdateContainer updates configuration of a container. Callers must hold a Lock on the Container.
+func (container *Container) UpdateContainer(hostConfig *containertypes.HostConfig) error {
 	// update resources of container
 	resources := hostConfig.Resources
 	cResources := &container.HostConfig.Resources
+
+	// validate NanoCPUs, CPUPeriod, and CPUQuota
+	// Because NanoCPU effectively updates CPUPeriod/CPUQuota,
+	// once NanoCPU is already set, updating CPUPeriod/CPUQuota will be blocked, and vice versa.
+	// In the following we make sure the intended update (resources) does not conflict with the existing (cResource).
+	if resources.NanoCPUs > 0 && cResources.CPUPeriod > 0 {
+		return fmt.Errorf("Conflicting options: Nano CPUs cannot be updated as CPU Period has already been set")
+	}
+	if resources.NanoCPUs > 0 && cResources.CPUQuota > 0 {
+		return fmt.Errorf("Conflicting options: Nano CPUs cannot be updated as CPU Quota has already been set")
+	}
+	if resources.CPUPeriod > 0 && cResources.NanoCPUs > 0 {
+		return fmt.Errorf("Conflicting options: CPU Period cannot be updated as NanoCPUs has already been set")
+	}
+	if resources.CPUQuota > 0 && cResources.NanoCPUs > 0 {
+		return fmt.Errorf("Conflicting options: CPU Quota cannot be updated as NanoCPUs has already been set")
+	}
+
 	if resources.BlkioWeight != 0 {
 		cResources.BlkioWeight = resources.BlkioWeight
 	}
 	if resources.CPUShares != 0 {
 		cResources.CPUShares = resources.CPUShares
+	}
+	if resources.NanoCPUs != 0 {
+		cResources.NanoCPUs = resources.NanoCPUs
 	}
 	if resources.CPUPeriod != 0 {
 		cResources.CPUPeriod = resources.CPUPeriod
@@ -312,61 +332,40 @@ func (container *Container) UpdateContainer(hostConfig *containertypes.HostConfi
 		container.HostConfig.RestartPolicy = hostConfig.RestartPolicy
 	}
 
-	if err := container.ToDisk(); err != nil {
-		logrus.Errorf("Error saving updated container: %v", err)
-		return err
-	}
-
 	return nil
 }
 
-func detachMounted(path string) error {
-	return syscall.Unmount(path, syscall.MNT_DETACH)
-}
-
-// UnmountVolumes unmounts all volumes
-func (container *Container) UnmountVolumes(forceSyscall bool, volumeEventLog func(name, action string, attributes map[string]string)) error {
-	var (
-		volumeMounts []volume.MountPoint
-		err          error
-	)
+// DetachAndUnmount uses a detached mount on all mount destinations, then
+// unmounts each volume normally.
+// This is used from daemon/archive for `docker cp`
+func (container *Container) DetachAndUnmount(volumeEventLog func(name, action string, attributes map[string]string)) error {
+	networkMounts := container.NetworkMounts()
+	mountPaths := make([]string, 0, len(container.MountPoints)+len(networkMounts))
 
 	for _, mntPoint := range container.MountPoints {
 		dest, err := container.GetResourcePath(mntPoint.Destination)
 		if err != nil {
-			return err
+			logrus.Warnf("Failed to get volume destination path for container '%s' at '%s' while lazily unmounting: %v", container.ID, mntPoint.Destination, err)
+			continue
 		}
-
-		volumeMounts = append(volumeMounts, volume.MountPoint{Destination: dest, Volume: mntPoint.Volume, ID: mntPoint.ID})
+		mountPaths = append(mountPaths, dest)
 	}
 
-	// Append any network mounts to the list (this is a no-op on Windows)
-	if volumeMounts, err = appendNetworkMounts(container, volumeMounts); err != nil {
-		return err
+	for _, m := range networkMounts {
+		dest, err := container.GetResourcePath(m.Destination)
+		if err != nil {
+			logrus.Warnf("Failed to get volume destination path for container '%s' at '%s' while lazily unmounting: %v", container.ID, m.Destination, err)
+			continue
+		}
+		mountPaths = append(mountPaths, dest)
 	}
 
-	for _, volumeMount := range volumeMounts {
-		if forceSyscall {
-			if err := detachMounted(volumeMount.Destination); err != nil {
-				logrus.Warnf("%s unmountVolumes: Failed to do lazy umount %v", container.ID, err)
-			}
-		}
-
-		if volumeMount.Volume != nil {
-			if err := volumeMount.Volume.Unmount(volumeMount.ID); err != nil {
-				return err
-			}
-			volumeMount.ID = ""
-
-			attributes := map[string]string{
-				"driver":    volumeMount.Volume.DriverName(),
-				"container": container.ID,
-			}
-			volumeEventLog(volumeMount.Volume.Name(), "unmount", attributes)
+	for _, mountPath := range mountPaths {
+		if err := detachMounted(mountPath); err != nil {
+			logrus.Warnf("%s unmountVolumes: Failed to do lazy umount fo volume '%s': %v", container.ID, mountPath, err)
 		}
 	}
-
-	return nil
+	return container.UnmountVolumes(volumeEventLog)
 }
 
 // copyExistingContents copies from the source to the destination and
@@ -383,7 +382,7 @@ func copyExistingContents(source, destination string) error {
 		}
 		if len(srcList) == 0 {
 			// If the source volume is empty, copies files from the root into the volume
-			if err := chrootarchive.CopyWithTar(source, destination); err != nil {
+			if err := chrootarchive.NewArchiver(nil).CopyWithTar(source, destination); err != nil {
 				return err
 			}
 		}
@@ -399,11 +398,26 @@ func copyOwnership(source, destination string) error {
 		return err
 	}
 
-	if err := os.Chown(destination, int(stat.UID()), int(stat.GID())); err != nil {
+	destStat, err := system.Stat(destination)
+	if err != nil {
 		return err
 	}
 
-	return os.Chmod(destination, os.FileMode(stat.Mode()))
+	// In some cases, even though UID/GID match and it would effectively be a no-op,
+	// this can return a permission denied error... for example if this is an NFS
+	// mount.
+	// Since it's not really an error that we can't chown to the same UID/GID, don't
+	// even bother trying in such cases.
+	if stat.UID() != destStat.UID() || stat.GID() != destStat.GID() {
+		if err := os.Chown(destination, int(stat.UID()), int(stat.GID())); err != nil {
+			return err
+		}
+	}
+
+	if stat.Mode() != destStat.Mode() {
+		return os.Chmod(destination, os.FileMode(stat.Mode()))
+	}
+	return nil
 }
 
 // TmpfsMounts returns the list of tmpfs mounts
@@ -418,7 +432,7 @@ func (container *Container) TmpfsMounts() ([]Mount, error) {
 	}
 	for dest, mnt := range container.MountPoints {
 		if mnt.Type == mounttypes.TypeTmpfs {
-			data, err := volume.ConvertTmpfsOptions(mnt.Spec.TmpfsOptions)
+			data, err := volume.ConvertTmpfsOptions(mnt.Spec.TmpfsOptions, mnt.Spec.ReadOnly)
 			if err != nil {
 				return nil, err
 			}
@@ -437,13 +451,25 @@ func cleanResourcePath(path string) string {
 	return filepath.Join(string(os.PathSeparator), path)
 }
 
-// canMountFS determines if the file system for the container
-// can be mounted locally. A no-op on non-Windows platforms
-func (container *Container) canMountFS() bool {
-	return true
-}
-
 // EnableServiceDiscoveryOnDefaultNetwork Enable service discovery on default network
 func (container *Container) EnableServiceDiscoveryOnDefaultNetwork() bool {
 	return false
+}
+
+// GetMountPoints gives a platform specific transformation to types.MountPoint. Callers must hold a Container lock.
+func (container *Container) GetMountPoints() []types.MountPoint {
+	mountPoints := make([]types.MountPoint, 0, len(container.MountPoints))
+	for _, m := range container.MountPoints {
+		mountPoints = append(mountPoints, types.MountPoint{
+			Type:        m.Type,
+			Name:        m.Name,
+			Source:      m.Path(),
+			Destination: m.Destination,
+			Driver:      m.Driver,
+			Mode:        m.Mode,
+			RW:          m.RW,
+			Propagation: m.Propagation,
+		})
+	}
+	return mountPoints
 }

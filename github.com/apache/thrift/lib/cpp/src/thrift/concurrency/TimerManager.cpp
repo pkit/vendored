@@ -29,7 +29,7 @@ namespace apache {
 namespace thrift {
 namespace concurrency {
 
-using boost::shared_ptr;
+using stdcxx::shared_ptr;
 
 /**
  * TimerManager class
@@ -51,6 +51,8 @@ public:
       state_ = COMPLETE;
     }
   }
+
+  bool operator==(const shared_ptr<Runnable> & runnable) const { return runnable_ == runnable; }
 
 private:
   shared_ptr<Runnable> runnable_;
@@ -290,10 +292,22 @@ void TimerManager::add(shared_ptr<Runnable> task, const struct timeval& value) {
 }
 
 void TimerManager::remove(shared_ptr<Runnable> task) {
-  (void)task;
   Synchronized s(monitor_);
   if (state_ != TimerManager::STARTED) {
     throw IllegalStateException();
+  }
+  bool found = false;
+  for (task_iterator ix = taskMap_.begin(); ix != taskMap_.end();) {
+    if (*ix->second == task) {
+      found = true;
+      taskCount_--;
+      taskMap_.erase(ix++);
+    } else {
+      ++ix;
+    }
+  }
+  if (!found) {
+    throw NoSuchTaskException();
   }
 }
 

@@ -162,7 +162,7 @@ type dotOutput struct {
 func (out *dotOutput) BasicHeader() {
 	out.g = new(graphviz).New()
 
-	ptree, _ := pkgtree.ListPackages(out.p.AbsRoot, string(out.p.ImportRoot))
+	ptree, _ := pkgtree.ListPackages(out.p.ResolvedAbsRoot, string(out.p.ImportRoot))
 	prm, _ := ptree.ToReachMap(true, false, false, nil)
 
 	out.g.createNode(string(out.p.ImportRoot), "", prm.FlattenFn(paths.IsStandardImportPath))
@@ -174,7 +174,11 @@ func (out *dotOutput) BasicFooter() {
 }
 
 func (out *dotOutput) BasicLine(bs *BasicStatus) {
-	out.g.createNode(bs.ProjectRoot, bs.Version.String(), bs.Children)
+	version := formatVersion(bs.Revision)
+	if bs.Version != nil {
+		version = formatVersion(bs.Version)
+	}
+	out.g.createNode(bs.ProjectRoot, version, bs.Children)
 }
 
 func (out *dotOutput) MissingHeader()                {}
@@ -257,13 +261,12 @@ func runStatusAll(ctx *dep.Ctx, out outputter, p *dep.Project, sm gps.SourceMana
 	var digestMismatch, hasMissingPkgs bool
 
 	if p.Lock == nil {
-		// TODO if we have no lock file, do...other stuff
-		return digestMismatch, hasMissingPkgs, nil
+		return digestMismatch, hasMissingPkgs, errors.Errorf("no Gopkg.lock found. Run `dep ensure` to generate lock file")
 	}
 
 	// While the network churns on ListVersions() requests, statically analyze
 	// code from the current project.
-	ptree, err := pkgtree.ListPackages(p.AbsRoot, string(p.ImportRoot))
+	ptree, err := pkgtree.ListPackages(p.ResolvedAbsRoot, string(p.ImportRoot))
 	if err != nil {
 		return digestMismatch, hasMissingPkgs, errors.Errorf("analysis of local packages failed: %v", err)
 	}
@@ -328,7 +331,7 @@ func runStatusAll(ctx *dep.Ctx, out outputter, p *dep.Project, sm gps.SourceMana
 				bs.Revision = tv
 			case gps.PairedVersion:
 				bs.Version = tv.Unpair()
-				bs.Revision = tv.Underlying()
+				bs.Revision = tv.Revision()
 			}
 
 			// Check if the manifest has an override for this project. If so,
@@ -364,7 +367,7 @@ func runStatusAll(ctx *dep.Ctx, out outputter, p *dep.Project, sm gps.SourceMana
 						// upgrade, the first version we encounter that
 						// matches our constraint will be what we want.
 						if c.Constraint.Matches(v) {
-							bs.Latest = v.Underlying()
+							bs.Latest = v.Revision()
 							break
 						}
 					}

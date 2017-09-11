@@ -24,6 +24,7 @@ import (
 type index interface {
 	Get(key []byte, atRev int64) (rev, created revision, ver int64, err error)
 	Range(key, end []byte, atRev int64) ([][]byte, []revision)
+	Revisions(key, end []byte, atRev int64) []revision
 	Put(key []byte, rev revision)
 	Tombstone(key []byte, rev revision) error
 	RangeSince(key, end []byte, rev int64) []revision
@@ -84,17 +85,8 @@ func (ti *treeIndex) keyIndex(keyi *keyIndex) *keyIndex {
 	return nil
 }
 
-func (ti *treeIndex) Range(key, end []byte, atRev int64) (keys [][]byte, revs []revision) {
-	if end == nil {
-		rev, _, _, err := ti.Get(key, atRev)
-		if err != nil {
-			return nil, nil
-		}
-		return [][]byte{key}, []revision{rev}
-	}
-
-	keyi := &keyIndex{key: key}
-	endi := &keyIndex{key: end}
+func (ti *treeIndex) visit(key, end []byte, f func(ki *keyIndex)) {
+	keyi, endi := &keyIndex{key: key}, &keyIndex{key: end}
 
 	ti.RLock()
 	defer ti.RUnlock()
@@ -103,16 +95,41 @@ func (ti *treeIndex) Range(key, end []byte, atRev int64) (keys [][]byte, revs []
 		if len(endi.key) > 0 && !item.Less(endi) {
 			return false
 		}
-		curKeyi := item.(*keyIndex)
-		rev, _, _, err := curKeyi.get(atRev)
-		if err != nil {
-			return true
-		}
-		revs = append(revs, rev)
-		keys = append(keys, curKeyi.key)
+		f(item.(*keyIndex))
 		return true
 	})
+}
 
+func (ti *treeIndex) Revisions(key, end []byte, atRev int64) (revs []revision) {
+	if end == nil {
+		rev, _, _, err := ti.Get(key, atRev)
+		if err != nil {
+			return nil
+		}
+		return []revision{rev}
+	}
+	ti.visit(key, end, func(ki *keyIndex) {
+		if rev, _, _, err := ki.get(atRev); err == nil {
+			revs = append(revs, rev)
+		}
+	})
+	return revs
+}
+
+func (ti *treeIndex) Range(key, end []byte, atRev int64) (keys [][]byte, revs []revision) {
+	if end == nil {
+		rev, _, _, err := ti.Get(key, atRev)
+		if err != nil {
+			return nil, nil
+		}
+		return [][]byte{key}, []revision{rev}
+	}
+	ti.visit(key, end, func(ki *keyIndex) {
+		if rev, _, _, err := ki.get(atRev); err == nil {
+			revs = append(revs, rev)
+			keys = append(keys, ki.key)
+		}
+	})
 	return keys, revs
 }
 

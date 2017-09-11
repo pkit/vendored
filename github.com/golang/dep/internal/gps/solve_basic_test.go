@@ -113,7 +113,7 @@ func mkAtom(info string) atom {
 	}
 
 	if rev != "" {
-		v = v.(UnpairedVersion).Is(rev)
+		v = v.(UnpairedVersion).Pair(rev)
 	}
 
 	return atom{
@@ -164,7 +164,7 @@ func mkPCstrnt(info string) ProjectConstraint {
 		// Of course, this *will* panic if the predicate is a revision or a
 		// semver constraint, neither of which implement UnpairedVersion. This
 		// is as intended, to prevent bad data from entering the system.
-		c = c.(UnpairedVersion).Is(rev)
+		c = c.(UnpairedVersion).Pair(rev)
 	}
 
 	return ProjectConstraint{
@@ -191,11 +191,10 @@ func mkCDep(pdep string, pl ...string) completeDep {
 // A depspec is a fixture representing all the information a SourceManager would
 // ordinarily glean directly from interrogating a repository.
 type depspec struct {
-	n       ProjectRoot
-	v       Version
-	deps    []ProjectConstraint
-	devdeps []ProjectConstraint
-	pkgs    []tpkg
+	n    ProjectRoot
+	v    Version
+	deps []ProjectConstraint
+	pkgs []tpkg
 }
 
 // mkDepspec creates a depspec by processing a series of strings, each of which
@@ -205,9 +204,6 @@ type depspec struct {
 // described - see the docs on mkAtom for details. subsequent strings are
 // interpreted as dep constraints of that dep at that version. See the docs on
 // mkPDep for details.
-//
-// If a string other than the first includes a "(dev) " prefix, it will be
-// treated as a test-only dependency.
 func mkDepspec(pi string, deps ...string) depspec {
 	pa := mkAtom(pi)
 	if string(pa.id.ProjectRoot) != pa.id.Source && pa.id.Source != "" {
@@ -220,15 +216,7 @@ func mkDepspec(pi string, deps ...string) depspec {
 	}
 
 	for _, dep := range deps {
-		var sl *[]ProjectConstraint
-		if strings.HasPrefix(dep, "(dev) ") {
-			dep = strings.TrimPrefix(dep, "(dev) ")
-			sl = &ds.devdeps
-		} else {
-			sl = &ds.deps
-		}
-
-		*sl = append(*sl, mkPCstrnt(dep))
+		ds.deps = append(ds.deps, mkPCstrnt(dep))
 	}
 
 	return ds
@@ -293,7 +281,7 @@ func mkrevlock(pairs ...string) fixLock {
 	l := make(fixLock, 0)
 	for _, s := range pairs {
 		pa := mkAtom(s)
-		l = append(l, NewLockedProject(pa.id, pa.v.(PairedVersion).Underlying(), nil))
+		l = append(l, NewLockedProject(pa.id, pa.v.(PairedVersion).Revision(), nil))
 	}
 
 	return l
@@ -355,13 +343,6 @@ func computeBasicReachMap(ds []depspec) reachMap {
 
 		for _, dep := range d.deps {
 			lm[n] = append(lm[n], string(dep.Ident.ProjectRoot))
-		}
-
-		// first is root
-		if k == 0 {
-			for _, dep := range d.devdeps {
-				lm[n] = append(lm[n], string(dep.Ident.ProjectRoot))
-			}
 		}
 	}
 
@@ -439,18 +420,14 @@ func (f basicFixture) solution() map[ProjectIdentifier]LockedProject {
 func (f basicFixture) rootmanifest() RootManifest {
 	return simpleRootManifest{
 		c:   pcSliceToMap(f.ds[0].deps),
-		tc:  pcSliceToMap(f.ds[0].devdeps),
 		ovr: f.ovr,
 	}
 }
 
 func (f basicFixture) rootTree() pkgtree.PackageTree {
-	var imp, timp []string
+	var imp []string
 	for _, dep := range f.ds[0].deps {
 		imp = append(imp, string(dep.Ident.ProjectRoot))
-	}
-	for _, dep := range f.ds[0].devdeps {
-		timp = append(timp, string(dep.Ident.ProjectRoot))
 	}
 
 	n := string(f.ds[0].n)
@@ -459,10 +436,9 @@ func (f basicFixture) rootTree() pkgtree.PackageTree {
 		Packages: map[string]pkgtree.PackageOrErr{
 			string(n): {
 				P: pkgtree.Package{
-					ImportPath:  n,
-					Name:        n,
-					Imports:     imp,
-					TestImports: timp,
+					ImportPath: n,
+					Name:       n,
+					Imports:    imp,
 				},
 			},
 		},
@@ -915,38 +891,6 @@ var basicFixtures = map[string]basicFixture{
 		),
 		r: mksolution(
 			"foo ptaggerino oldrev",
-		),
-	},
-	"includes root package's dev dependencies": {
-		ds: []depspec{
-			mkDepspec("root 1.0.0", "(dev) foo 1.0.0", "(dev) bar 1.0.0"),
-			mkDepspec("foo 1.0.0"),
-			mkDepspec("bar 1.0.0"),
-		},
-		r: mksolution(
-			"foo 1.0.0",
-			"bar 1.0.0",
-		),
-	},
-	"includes dev dependency's transitive dependencies": {
-		ds: []depspec{
-			mkDepspec("root 1.0.0", "(dev) foo 1.0.0"),
-			mkDepspec("foo 1.0.0", "bar 1.0.0"),
-			mkDepspec("bar 1.0.0"),
-		},
-		r: mksolution(
-			"foo 1.0.0",
-			"bar 1.0.0",
-		),
-	},
-	"ignores transitive dependency's dev dependencies": {
-		ds: []depspec{
-			mkDepspec("root 1.0.0", "(dev) foo 1.0.0"),
-			mkDepspec("foo 1.0.0", "(dev) bar 1.0.0"),
-			mkDepspec("bar 1.0.0"),
-		},
-		r: mksolution(
-			"foo 1.0.0",
 		),
 	},
 	"no version that matches requirement": {
@@ -1419,7 +1363,7 @@ func (sm *depspecSourceManager) ExternalReach(id ProjectIdentifier, v Version) (
 
 func (sm *depspecSourceManager) ListPackages(id ProjectIdentifier, v Version) (pkgtree.PackageTree, error) {
 	pid := pident{n: ProjectRoot(id.normalizedSource()), v: v}
-	if pv, ok := v.(PairedVersion); ok && pv.Underlying() == "FAKEREV" {
+	if pv, ok := v.(PairedVersion); ok && pv.Revision() == "FAKEREV" {
 		// An empty rev may come in here because that's what we produce in
 		// ListVersions(). If that's what we see, then just pretend like we have
 		// an unpaired.
@@ -1482,7 +1426,7 @@ func (sm *depspecSourceManager) ListVersions(id ProjectIdentifier) ([]PairedVers
 		case UnpairedVersion:
 			// Dummy revision; if the fixture doesn't provide it, we know
 			// the test doesn't need revision info, anyway.
-			pvl = append(pvl, tv.Is(Revision("FAKEREV")))
+			pvl = append(pvl, tv.Pair(Revision("FAKEREV")))
 		default:
 			panic(fmt.Sprintf("unreachable: type of version was %#v for spec %s", ds.v, id.errString()))
 		}
@@ -1550,6 +1494,15 @@ func (sm *depspecSourceManager) ignore() map[string]bool {
 	return sm.ig
 }
 
+// InferConstraint tries to puzzle out what kind of version is given in a string -
+// semver, a revision, or as a fallback, a plain tag. This current implementation
+// is a panic because there's no current circumstance under which the depspecSourceManager
+// is useful outside of the gps solving tests, and it shouldn't be used anywhere else without a conscious and intentional
+// expansion of its semantics.
+func (sm *depspecSourceManager) InferConstraint(s string, pi ProjectIdentifier) (Constraint, error) {
+	panic("depsecSourceManager is only for gps solving tests")
+}
+
 type depspecBridge struct {
 	*bridge
 }
@@ -1568,7 +1521,7 @@ func (b *depspecBridge) listVersions(id ProjectIdentifier) ([]Version, error) {
 	// remove the underlying component.
 	vl := make([]Version, 0, len(pvl))
 	for _, v := range pvl {
-		if v.Underlying() == "FAKEREV" {
+		if v.Revision() == "FAKEREV" {
 			vl = append(vl, v.Unpair())
 		} else {
 			vl = append(vl, v)
@@ -1611,11 +1564,6 @@ var _ Lock = fixLock{}
 // impl Spec interface
 func (ds depspec) DependencyConstraints() ProjectConstraints {
 	return pcSliceToMap(ds.deps)
-}
-
-// impl Spec interface
-func (ds depspec) TestDependencyConstraints() ProjectConstraints {
-	return pcSliceToMap(ds.devdeps)
 }
 
 type fixLock []LockedProject

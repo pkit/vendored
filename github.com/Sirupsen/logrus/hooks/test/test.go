@@ -1,6 +1,3 @@
-// The Test package is used for testing logrus. It is here for backwards
-// compatibility from when logrus' organization was upper-case. Please use
-// lower-case logrus and the `null` package instead of this one.
 package test
 
 import (

@@ -30,20 +30,18 @@ func (daemon *Daemon) getLibcontainerdCreateOptions(container *container.Contain
 		hvOpts.IsHyperV = container.HostConfig.Isolation.IsHyperV()
 	}
 
+	dnsSearch := daemon.getDNSSearchSettings(container)
+
 	// Generate the layer folder of the layer options
 	layerOpts := &libcontainerd.LayerOption{}
 	m, err := container.RWLayer.Metadata()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get layer metadata - %s", err)
 	}
-	if hvOpts.IsHyperV {
-		hvOpts.SandboxPath = filepath.Dir(m["dir"])
-	}
-
 	layerOpts.LayerFolderPath = m["dir"]
 
 	// Generate the layer paths of the layer options
-	img, err := daemon.imageStore.Get(container.ImageID)
+	img, err := daemon.stores[container.Platform].imageStore.Get(container.ImageID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to graph.Get on ImageID %s - %s", container.ImageID, err)
 	}
@@ -51,9 +49,9 @@ func (daemon *Daemon) getLibcontainerdCreateOptions(container *container.Contain
 	max := len(img.RootFS.DiffIDs)
 	for i := 1; i <= max; i++ {
 		img.RootFS.DiffIDs = img.RootFS.DiffIDs[:i]
-		layerPath, err := layer.GetLayerPath(daemon.layerStore, img.RootFS.ChainID())
+		layerPath, err := layer.GetLayerPath(daemon.stores[container.Platform].layerStore, img.RootFS.ChainID())
 		if err != nil {
-			return nil, fmt.Errorf("failed to get layer path from graphdriver %s for ImageID %s - %s", daemon.layerStore, img.RootFS.ChainID(), err)
+			return nil, fmt.Errorf("failed to get layer path from graphdriver %s for ImageID %s - %s", daemon.stores[container.Platform].layerStore, img.RootFS.ChainID(), err)
 		}
 		// Reverse order, expecting parent most first
 		layerOpts.LayerPaths = append([]string{layerPath}, layerOpts.LayerPaths...)
@@ -62,6 +60,7 @@ func (daemon *Daemon) getLibcontainerdCreateOptions(container *container.Contain
 	// Get endpoints for the libnetwork allocated networks to the container
 	var epList []string
 	AllowUnqualifiedDNSQuery := false
+	gwHNSID := ""
 	if container.NetworkSettings != nil {
 		for n := range container.NetworkSettings.Networks {
 			sn, err := daemon.FindNetwork(n)
@@ -78,6 +77,14 @@ func (daemon *Daemon) getLibcontainerdCreateOptions(container *container.Contain
 			if err != nil {
 				continue
 			}
+
+			if data["GW_INFO"] != nil {
+				gwInfo := data["GW_INFO"].(map[string]interface{})
+				if gwInfo["hnsid"] != nil {
+					gwHNSID = gwInfo["hnsid"].(string)
+				}
+			}
+
 			if data["hnsid"] != nil {
 				epList = append(epList, data["hnsid"].(string))
 			}
@@ -86,6 +93,10 @@ func (daemon *Daemon) getLibcontainerdCreateOptions(container *container.Contain
 				AllowUnqualifiedDNSQuery = true
 			}
 		}
+	}
+
+	if gwHNSID != "" {
+		epList = append(epList, gwHNSID)
 	}
 
 	// Read and add credentials from the security options if a credential spec has been provided.
@@ -135,10 +146,21 @@ func (daemon *Daemon) getLibcontainerdCreateOptions(container *container.Contain
 	createOptions = append(createOptions, &libcontainerd.FlushOption{IgnoreFlushesDuringBoot: !container.HasBeenStartedBefore})
 	createOptions = append(createOptions, hvOpts)
 	createOptions = append(createOptions, layerOpts)
-	if epList != nil {
-		createOptions = append(createOptions, &libcontainerd.NetworkEndpointsOption{Endpoints: epList, AllowUnqualifiedDNSQuery: AllowUnqualifiedDNSQuery})
+
+	var networkSharedContainerID string
+	if container.HostConfig.NetworkMode.IsContainer() {
+		networkSharedContainerID = container.NetworkSharedContainerID
+		for _, ep := range container.SharedEndpointList {
+			epList = append(epList, ep)
+		}
 	}
 
+	createOptions = append(createOptions, &libcontainerd.NetworkEndpointsOption{
+		Endpoints:                epList,
+		AllowUnqualifiedDNSQuery: AllowUnqualifiedDNSQuery,
+		DNSSearchList:            dnsSearch,
+		NetworkSharedContainerID: networkSharedContainerID,
+	})
 	return createOptions, nil
 }
 
